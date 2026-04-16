@@ -1,0 +1,97 @@
+{
+  "name": "token-accumulator-counter-opencode",
+  "version": "0.1.0",
+  "description": "🌮 TACO — Token Accumulator Counter for OpenCode. Analyze and visualize your AI coding session usage across dates, models, and projects.",
+  "keywords": [
+    "opencode",
+    "ai",
+    "tokens",
+    "usage",
+    "stats",
+    "analytics",
+    "cli",
+    "cost-tracking",
+    "token-usage"
+  ],
+  "author": "bulga138",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "taco": "./dist/bin/taco.js"
+  },
+  "main": "./dist/src/index.js",
+  "exports": {
+    ".": "./dist/src/index.js",
+    "./plugin": "./dist/src/plugin/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "bun run bin/taco.ts",
+    "start": "bun run dist/bin/taco.js",
+    "start:node": "node dist/bin/taco.js",
+    "test": "bun test || vitest run",
+    "test:node": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src bin --ext .ts",
+    "lint:fix": "eslint src bin --ext .ts --fix",
+    "format": "prettier --write \"src/**/*.ts\" \"bin/**/*.ts\" \"tests/**/*.ts\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"bin/**/*.ts\" \"tests/**/*.ts\"",
+    "bundle": "bun build ./bin/taco.ts --outfile ./taco --compile",
+    "prepublishOnly": "npm run build && npm test"
+  },
+  "dependencies": {
+    "asciichart": "1.5.25",
+    "chalk": "5.6.2",
+    "commander": "14.0.3",
+    "csv-stringify": "6.7.0",
+    "dayjs": "1.11.20",
+    "sql.js": "1.14.1"
+  },
+  "optionalDependencies": {
+    "better-sqlite3": "12.9.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "7.6.13",
+    "@types/bun": "1.3.12",
+    "@types/node": "25.6.0",
+    "@typescript-eslint/eslint-plugin": "8.58.2",
+    "@typescript-eslint/parser": "8.58.2",
+    "eslint": "10.2.0",
+    "globals": "17.5.0",
+    "prettier": "3.6.2",
+    "tsx": "4.21.0",
+    "typescript": "5.8.2",
+    "vitest": "4.1.4"
+  },
+  "peerDependencies": {
+    "@opencode-ai/plugin": "*"
+  },
+  "peerDependenciesMeta": {
+    "@opencode-ai/plugin": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bulga138/token-accumulator-counter-opencode.git"
+  },
+  "bugs": {
+    "url": "https://github.com/bulga138/token-accumulator-counter-opencode/issues"
+  },
+  "homepage": "https://github.com/bulga138/token-accumulator-counter-opencode#readme",
+  "files": [
+    "dist/",
+    "bin/",
+    "install.sh",
+    "install.ps1",
+    "uninstall.sh",
+    "update.sh",
+    "README.md",
+    "LICENSE"
+  ]
+}

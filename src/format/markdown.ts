@@ -1,0 +1,167 @@
+import type {
+  OverviewStats,
+  ModelStats,
+  ProviderStats,
+  AgentStats,
+  DailyStats,
+  ProjectStats,
+  SessionStats,
+  PeriodStats,
+} from '../data/types.js'
+import { formatTokens, formatCost, formatPercent } from '../utils/formatting.js'
+import { formatDuration } from '../utils/dates.js'
+
+export function formatOverviewMarkdown(stats: OverviewStats, label: string): string {
+  const lines: string[] = [
+    `# TACO Usage Overview${label ? ` · ${label}` : ''}`,
+    '',
+    '## Activity Summary',
+    '',
+    '| Metric | Value |',
+    '|--------|-------|',
+    `| **Sessions** | ${stats.sessionCount} |`,
+    `| **Messages** | ${stats.messageCount} |`,
+    `| **Active Days** | ${stats.activedays}/${stats.totalDays} (${Math.round((stats.activedays / stats.totalDays) * 100)}%) |`,
+    `| **Current Streak** | ${stats.currentStreak} days |`,
+    `| **Longest Streak** | ${stats.longestStreak} days |`,
+    '',
+    '## Cost & Tokens',
+    '',
+    '| Metric | Value |',
+    '|--------|-------|',
+    `| **Total Cost** | ${formatCost(stats.cost)} |`,
+    `| **Avg Cost/Day** | $${(stats.cost / Math.max(stats.activedays, 1)).toFixed(2)} |`,
+    `| **Total Tokens** | ${formatTokens(stats.tokens.total)} |`,
+    `| **Input Tokens** | ${formatTokens(stats.tokens.input)} |`,
+    `| **Output Tokens** | ${formatTokens(stats.tokens.output)} |`,
+    `| **Cache Read** | ${formatTokens(stats.tokens.cacheRead)} |`,
+    `| **Cache Write** | ${formatTokens(stats.tokens.cacheWrite)} |`,
+    `| **Cache Efficiency** | ${Math.round((stats.tokens.cacheRead / Math.max(stats.tokens.total, 1)) * 100)}% |`,
+    '',
+    '## Model & Session Info',
+    '',
+    '| Metric | Value |',
+    '|--------|-------|',
+    `| **Favorite Model** | ${stats.favoriteModel ?? '—'} |`,
+    `| **Longest Session** | ${formatDuration(stats.longestSessionMs)} |`,
+    `| **Avg Messages/Session** | ${Math.round(stats.messageCount / Math.max(stats.sessionCount, 1))} |`,
+    '',
+  ]
+  return lines.join('\n')
+}
+
+export function formatModelsMarkdown(models: ModelStats[], label: string): string {
+  const lines: string[] = [
+    `# 🌮 TACO — Models${label ? ` · ${label}` : ''}`,
+    '',
+    '| Model | Tokens | Input | Output | Cost | Share |',
+    '|-------|--------|-------|--------|------|-------|',
+  ]
+  for (const m of models) {
+    lines.push(
+      `| ${m.modelId} | ${formatTokens(m.tokens.total)} | ${formatTokens(m.tokens.input)} | ${formatTokens(m.tokens.output)} | ${formatCost(m.cost)} | ${formatPercent(m.percentage)} |`
+    )
+  }
+  lines.push('')
+  return lines.join('\n')
+}
+
+export function formatProviderMarkdown(providers: ProviderStats[], label: string): string {
+  const lines: string[] = [
+    `# 🌮 TACO — Providers${label ? ` · ${label}` : ''}`,
+    '',
+    '| Provider | Tokens | Cost | Share |',
+    '|----------|--------|------|-------|',
+  ]
+  for (const p of providers) {
+    lines.push(
+      `| ${p.providerId} | ${formatTokens(p.tokens.total)} | ${formatCost(p.cost)} | ${formatPercent(p.percentage)} |`
+    )
+  }
+  lines.push('')
+  return lines.join('\n')
+}
+
+export function formatDailyMarkdown(daily: DailyStats[], label: string): string {
+  const lines: string[] = [
+    `# 🌮 TACO — Daily${label ? ` · ${label}` : ''}`,
+    '',
+    '| Date | Sessions | Messages | Tokens | Cost |',
+    '|------|----------|----------|--------|------|',
+  ]
+  for (const d of daily) {
+    lines.push(
+      `| ${d.date} | ${d.sessionCount} | ${d.messageCount} | ${formatTokens(d.tokens.total)} | ${formatCost(d.cost)} |`
+    )
+  }
+  lines.push('')
+  return lines.join('\n')
+}
+
+export function formatProjectsMarkdown(projects: ProjectStats[], label: string): string {
+  const lines: string[] = [
+    `# 🌮 TACO — Projects${label ? ` · ${label}` : ''}`,
+    '',
+    '| Project | Sessions | Messages | Tokens | Cost |',
+    '|---------|----------|----------|--------|------|',
+  ]
+  for (const p of projects) {
+    lines.push(
+      `| ${p.directory} | ${p.sessionCount} | ${p.messageCount} | ${formatTokens(p.tokens.total)} | ${formatCost(p.cost)} |`
+    )
+  }
+  lines.push('')
+  return lines.join('\n')
+}
+
+export function formatSessionsMarkdown(sessions: SessionStats[], label: string): string {
+  const lines: string[] = [
+    `# 🌮 TACO — Sessions${label ? ` · ${label}` : ''}`,
+    '',
+    '| Title | Created | Messages | Tokens | Cost | Duration |',
+    '|-------|---------|----------|--------|------|----------|',
+  ]
+  for (const s of sessions) {
+    lines.push(
+      `| ${s.title ?? s.sessionId} | ${new Date(s.timeCreated).toLocaleDateString()} | ${s.messageCount} | ${formatTokens(s.tokens.total)} | ${formatCost(s.cost)} | ${s.durationMs ? formatDuration(s.durationMs) : '—'} |`
+    )
+  }
+  lines.push('')
+  return lines.join('\n')
+}
+
+export function formatAgentsMarkdown(agents: AgentStats[], label: string): string {
+  const lines: string[] = [
+    `# 🌮 TACO — Agents${label ? ` · ${label}` : ''}`,
+    '',
+    '| Agent | Messages | Tokens | Cost | Share |',
+    '|-------|----------|--------|------|-------|',
+  ]
+  for (const a of agents) {
+    lines.push(
+      `| ${a.agent} | ${a.messageCount} | ${formatTokens(a.tokens.total)} | ${formatCost(a.cost)} | ${formatPercent(a.percentage)} |`
+    )
+  }
+  lines.push('')
+  return lines.join('\n')
+}
+
+export function formatTrendsMarkdown(trends: PeriodStats[], period: string, label: string): string {
+  const lines: string[] = [
+    `# 🌮 TACO — Trends · ${period}${label ? ` · ${label}` : ''}`,
+    '',
+    '| Period | Sessions | Messages | Tokens | Cost | Δ Cost |',
+    '|--------|----------|----------|--------|------|--------|',
+  ]
+  for (const t of trends) {
+    const delta =
+      t.deltaPercent !== null
+        ? `${t.deltaPercent >= 0 ? '+' : ''}${(t.deltaPercent * 100).toFixed(1)}%`
+        : '—'
+    lines.push(
+      `| ${t.label} | ${t.sessionCount} | ${t.messageCount} | ${formatTokens(t.tokens.total)} | ${formatCost(t.cost)} | ${delta} |`
+    )
+  }
+  lines.push('')
+  return lines.join('\n')
+}

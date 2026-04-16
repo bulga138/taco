@@ -1,0 +1,9 @@
+node_modules
+
+dist
+build
+
+# Release artifacts
+*.tar.gz
+*.zip
+*.tgz
