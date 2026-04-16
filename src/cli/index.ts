@@ -11,6 +11,7 @@ import { registerExportCommand } from './commands/export.js'
 import { registerTuiCommand } from './commands/tui.js'
 import { registerTodayCommand } from './commands/today.js'
 import { registerConfigCommand } from './commands/config-cmd.js'
+import { registerHealthCommand } from './commands/health.js'
 import packageJson from '../../package.json' with { type: 'json' }
 
 // ── Braille art embedded as a constant
@@ -86,6 +87,7 @@ export function createProgram(): Command {
   registerTuiCommand(program)
   registerTodayCommand(program)
   registerConfigCommand(program)
+  registerHealthCommand(program)
 
   // Default action (no sub-command) → run TUI if TTY available, otherwise overview
   program.action(async () => {

@@ -1,6 +1,7 @@
 import type { Command } from 'commander'
 import { getConfig, getConfigPath, saveConfig } from '../../config/index.js'
 import type { TacoConfig } from '../../config/index.js'
+import { runInitWizard } from './init-wizard.js'
 
 export function registerConfigCommand(program: Command): void {
   const cmd = program
@@ -12,6 +13,7 @@ export function registerConfigCommand(program: Command): void {
 Subcommands:
   taco config              Show current config and path
   taco config path         Print config file path
+  taco config init         Interactive setup wizard
   taco config set <k> <v>  Set a config value
 
 Valid keys:
@@ -29,11 +31,13 @@ Examples:
   taco config set db /path/to/opencode.db`
     )
 
-  cmd.action((subcommand?: string, key?: string, value?: string) => {
+  cmd.action(async (subcommand?: string, key?: string, value?: string) => {
     if (!subcommand || subcommand === 'show') {
       printConfig()
     } else if (subcommand === 'path') {
       console.log(getConfigPath())
+    } else if (subcommand === 'init') {
+      await runInitWizard()
     } else if (subcommand === 'set') {
       if (!key || value === undefined) {
         console.error('Usage: taco config set <key> <value>')

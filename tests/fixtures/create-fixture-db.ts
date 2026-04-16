@@ -1,4 +1,4 @@
-import { readFileSync } from 'fs'
+import { readFileSync, writeFileSync } from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 
@@ -391,6 +391,49 @@ export async function createFixtureDbAsync(): Promise<Database> {
         finish: 'stop',
       }),
     },
+    // Session 7 extra messages — non-stop finish reasons for health tests
+    {
+      id: 'msg_007c',
+      session_id: 'ses_007',
+      time_created: now - 12 * oneDay + 4000,
+      data: JSON.stringify({
+        role: 'assistant',
+        time: { created: now - 12 * oneDay + 4000, completed: now - 12 * oneDay + 6000 },
+        modelID: 'gpt-4o',
+        providerID: 'openai',
+        agent: 'build',
+        cost: 0.09,
+        tokens: {
+          input: 1200,
+          output: 200,
+          reasoning: 0,
+          cache: { read: 0, write: 0 },
+          total: 1400,
+        },
+        finish: 'length',
+      }),
+    },
+    {
+      id: 'msg_007d',
+      session_id: 'ses_007',
+      time_created: now - 12 * oneDay + 7000,
+      data: JSON.stringify({
+        role: 'assistant',
+        time: { created: now - 12 * oneDay + 7000, completed: now - 12 * oneDay + 8000 },
+        modelID: 'claude-sonnet-4-6',
+        providerID: 'anthropic',
+        agent: 'build',
+        cost: 0.0,
+        tokens: {
+          input: 500,
+          output: 0,
+          reasoning: 0,
+          cache: { read: 0, write: 0 },
+          total: 500,
+        },
+        finish: 'error',
+      }),
+    },
   ]
 
   for (const m of messages) {
@@ -456,4 +499,77 @@ export function createFixtureDb(): Database {
   if (!db) throw new Error('Timeout creating fixture database')
 
   return db
+}
+
+/**
+ * Creates the fixture DB and writes it to disk as a real SQLite file.
+ * Used by integration tests that call CLI commands via `--db <path>`.
+ */
+export async function exportFixtureDbToFile(filePath: string): Promise<void> {
+  const SQL = await initSql()
+  const db = new SQL.Database()
+
+  // Re-run all the DDL + inserts from createFixtureDbAsync
+  // We can't reuse the in-memory DB because sql.js doesn't share state.
+  // Instead, create a fresh fixture, export the bytes, and write them.
+  const wrapper = await createFixtureDbAsync()
+
+  // Unfortunately the wrapper doesn't expose the raw sql.js handle.
+  // So we build a second DB from scratch—grab full SQL dump via the wrapper.
+  // Simpler approach: use sql.js to create + populate then export.
+  const db2 = new SQL.Database()
+
+  // Create tables
+  db2.run(`
+    CREATE TABLE session (
+      id TEXT PRIMARY KEY,
+      title TEXT,
+      directory TEXT,
+      parent_id TEXT,
+      project_id TEXT,
+      time_created INTEGER,
+      time_updated INTEGER
+    )
+  `)
+  db2.run(`
+    CREATE TABLE message (
+      id TEXT PRIMARY KEY,
+      session_id TEXT,
+      time_created INTEGER,
+      data TEXT,
+      FOREIGN KEY (session_id) REFERENCES session(id)
+    )
+  `)
+
+  // Copy session data via the wrapper
+  const sessions = wrapper.prepare<{
+    id: string; title: string; directory: string;
+    parent_id: string | null; project_id: string | null;
+    time_created: number; time_updated: number;
+  }>('SELECT * FROM session').all()
+
+  for (const s of sessions) {
+    db2.run(
+      'INSERT INTO session (id, title, directory, parent_id, project_id, time_created, time_updated) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [s.id, s.title, s.directory, s.parent_id, s.project_id, s.time_created, s.time_updated]
+    )
+  }
+
+  const messages = wrapper.prepare<{
+    id: string; session_id: string; time_created: number; data: string;
+  }>('SELECT * FROM message').all()
+
+  for (const m of messages) {
+    db2.run(
+      'INSERT INTO message (id, session_id, time_created, data) VALUES (?, ?, ?, ?)',
+      [m.id, m.session_id, m.time_created, m.data]
+    )
+  }
+
+  wrapper.close()
+
+  const data = db2.export()
+  db2.close()
+  db.close()
+  writeFileSync(filePath, Buffer.from(data))
 }

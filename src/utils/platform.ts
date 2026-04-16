@@ -52,9 +52,10 @@ export function validateDbPath(dbPath: string): void {
         '',
         'Possible fixes:',
         '  1. Install and run OpenCode at least once  →  https://opencode.ai',
-        '  2. Override for this run:    taco --db /path/to/opencode.db',
-        '  3. Set path permanently:     taco config set db /path/to/opencode.db',
-        '  4. Or via environment var:   export OPENCODE_DB=/path/to/opencode.db',
+        '  2. Run the setup wizard:     taco config init',
+        '  3. Override for this run:    taco --db /path/to/opencode.db',
+        '  4. Set path permanently:     taco config set db /path/to/opencode.db',
+        '  5. Or via environment var:   export OPENCODE_DB=/path/to/opencode.db',
       ].join('\n')
     )
   }
