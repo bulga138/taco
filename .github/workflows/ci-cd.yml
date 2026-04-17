@@ -8,14 +8,18 @@ on:
     branches: [master]
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag to release (e.g., v0.1.2)'
+        required: true
+        type: string
 
 jobs:
+  # Quick smoke test - pnpm on Ubuntu (primary package manager)
   test:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-        node-version: [20.x, 22.x]
+    name: Test (pnpm + Node 20)
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
 
@@ -25,10 +29,10 @@ jobs:
           version: 9
           run_install: false
 
-      - name: Setup Node.js ${{ matrix.node-version }}
+      - name: Setup Node.js 20.x
         uses: actions/setup-node@v6.3.0
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version: '20.x'
           cache: 'pnpm'
 
       - name: Install dependencies
@@ -40,7 +44,9 @@ jobs:
       - name: Run tests
         run: pnpm test
 
+  # Bun test (different runtime, worth keeping)
   test-bun:
+    name: Test (Bun)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -54,24 +60,34 @@ jobs:
       - name: Run tests
         run: bun test
 
+  # Build and release binaries for all platforms
   build-and-release:
+    name: Build ${{ matrix.target }}
     needs: [test, test-bun]
     runs-on: ${{ matrix.os }}
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     strategy:
       matrix:
         include:
           - os: ubuntu-latest
             target: linux-x64
+            os_name: linux
+            arch: x64
             ext: ''
           - os: windows-latest
             target: windows-x64
+            os_name: windows
+            arch: x64
             ext: '.exe'
           - os: macos-latest
             target: macos-x64
+            os_name: macos
+            arch: x64
             ext: ''
           - os: macos-14
             target: macos-arm64
+            os_name: macos
+            arch: arm64
             ext: ''
     steps:
       - uses: actions/checkout@v6
@@ -111,8 +127,12 @@ jobs:
 
       - name: Rename executable
         run: |
-          VERSION=${GITHUB_REF#refs/tags/}
-          mv taco "taco-${VERSION}-${{ matrix.target }}${{ matrix.ext }}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION=${GITHUB_REF#refs/tags/}
+          fi
+          mv taco "taco-${VERSION}-${{ matrix.os_name }}-${{ matrix.arch }}${{ matrix.ext }}"
         shell: bash
 
       - name: Upload executable to release
@@ -123,10 +143,31 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Generate checksum
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION=${GITHUB_REF#refs/tags/}
+          fi
+          sha256sum "taco-${VERSION}-${{ matrix.os_name }}-${{ matrix.arch }}${{ matrix.ext }}" > "taco-${VERSION}-${{ matrix.os_name }}-${{ matrix.arch }}.sha256"
+          cat "taco-${VERSION}-${{ matrix.os_name }}-${{ matrix.arch }}.sha256"
+        shell: bash
+
+      - name: Upload checksum
+        uses: softprops/action-gh-release@v3.0.0
+        with:
+          files: taco-*.sha256
+          generate_release_notes: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Create source archive for install scripts
   create-source-archive:
+    name: Create Source Archive
     needs: [test, test-bun]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     steps:
       - uses: actions/checkout@v6
 
@@ -150,13 +191,18 @@ jobs:
 
       - name: Create source archive
         run: |
-          VERSION=${GITHUB_REF#refs/tags/}
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION=${GITHUB_REF#refs/tags/}
+          fi
           tar -czf "taco-release-${VERSION}.tar.gz" \
             dist/ \
             bin/ \
             install.sh \
             install.ps1 \
             uninstall.sh \
+            uninstall.ps1 \
             update.sh \
             README.md \
             package.json \
