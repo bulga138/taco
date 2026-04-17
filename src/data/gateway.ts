@@ -12,6 +12,14 @@ import type { GatewayConfig, GatewayAuth } from '../config/index.js'
 import type { GatewayMetrics } from './gateway-types.js'
 import { resolveJsonPath, resolveEnvVar } from '../utils/jsonpath.js'
 import { readGatewayCache, writeGatewayCache } from './gateway-cache.js'
+import { sanitizeErrorMessage } from '../utils/error-sanitization.js'
+
+// Type for fetch request options (Node.js fetch API)
+interface RequestInit {
+  method?: string
+  headers?: Record<string, string>
+  body?: string
+}
 
 // ─── Public API ──────────────────────────────────────────────────────────────────
 
@@ -31,7 +39,8 @@ export async function fetchGatewayMetrics(config: GatewayConfig): Promise<Gatewa
     return await doFetch(config)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    console.warn(`[taco] Gateway fetch failed: ${msg}`)
+    const sanitizedMsg = sanitizeErrorMessage(msg)
+    console.warn(`[taco] Gateway fetch failed: ${sanitizedMsg}`)
     return null
   }
 }
@@ -53,7 +62,11 @@ async function doFetch(config: GatewayConfig): Promise<GatewayMetrics> {
   const response = await fetch(url, requestInit)
 
   if (!response.ok) {
-    throw new Error(`Gateway returned HTTP ${response.status} ${response.statusText} for ${url}`)
+    // Extract hostname only for error message (don't expose full URL with potential secrets)
+    const hostname = new URL(url).hostname
+    throw new Error(
+      `Gateway returned HTTP ${response.status} ${response.statusText} for [${hostname}]`
+    )
   }
 
   const json: unknown = await response.json()

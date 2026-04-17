@@ -15,7 +15,16 @@
 
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from 'node:fs'
+import {
+  existsSync,
+  readFileSync,
+  writeFileSync,
+  mkdirSync,
+  unlinkSync,
+  statSync,
+  readdirSync,
+  chmodSync,
+} from 'node:fs'
 import type {
   GatewayMetrics,
   GatewayDailySnapshot,
@@ -23,6 +32,10 @@ import type {
   GatewayDailyActivityResult,
 } from './gateway-types.js'
 import type { GatewayConfig } from '../config/index.js'
+
+// Cache retention: 90 days for daily snapshots
+const CACHE_RETENTION_DAYS = 90
+const MS_PER_DAY = 24 * 60 * 60 * 1000
 
 // ─── Paths ──────────────────────────────────────────────────────────────────────
 
@@ -83,6 +96,12 @@ export function writeGatewayCache(data: GatewayMetrics, config: GatewayConfig): 
 
   try {
     writeFileSync(LIVE_CACHE_FILE, JSON.stringify(entry, null, 2), 'utf-8')
+    // Set file permissions to 0600 (owner read/write only)
+    try {
+      chmodSync(LIVE_CACHE_FILE, 0o600)
+    } catch {
+      // Non-fatal: chmod may fail on Windows
+    }
   } catch {
     // Non-fatal — cache write failure should not break the main flow
   }
@@ -111,7 +130,6 @@ export function clearAllGatewayData(): void {
   clearGatewayCache()
 
   if (existsSync(DAILY_DIR)) {
-    const { readdirSync } = require('node:fs') as typeof import('node:fs')
     try {
       const files = readdirSync(DAILY_DIR)
       for (const f of files) {
@@ -125,11 +143,50 @@ export function clearAllGatewayData(): void {
   }
 }
 
+// ─── Cache rotation ─────────────────────────────────────────────────────────────
+
+/**
+ * Removes daily snapshot files older than CACHE_RETENTION_DAYS (90 days).
+ * Called periodically to prevent unbounded cache growth.
+ */
+function rotateDailyCache(): void {
+  if (!existsSync(DAILY_DIR)) return
+
+  const cutoffTime = Date.now() - CACHE_RETENTION_DAYS * MS_PER_DAY
+
+  try {
+    const files = readdirSync(DAILY_DIR)
+    let deletedCount = 0
+
+    for (const f of files) {
+      if (!f.endsWith('.json')) continue
+
+      const filePath = join(DAILY_DIR, f)
+      try {
+        const stats = statSync(filePath)
+        if (stats.mtimeMs < cutoffTime) {
+          unlinkSync(filePath)
+          deletedCount++
+        }
+      } catch {
+        // Skip files we can't stat/unlink
+      }
+    }
+
+    if (deletedCount > 0) {
+      console.log(`Rotated ${deletedCount} old cache files (> ${CACHE_RETENTION_DAYS} days)`)
+    }
+  } catch {
+    // Non-fatal: rotation failure shouldn't break main flow
+  }
+}
+
 // ─── Daily snapshots ────────────────────────────────────────────────────────────
 
 /**
  * Writes (or overwrites) the snapshot for today (local time).
  * Overwrites are fine — we always want the last value of the day.
+ * Also triggers cache rotation to clean up old files.
  */
 function writeDailySnapshot(data: GatewayMetrics, endpoint: string): void {
   ensureDir(DAILY_DIR)
@@ -145,9 +202,18 @@ function writeDailySnapshot(data: GatewayMetrics, endpoint: string): void {
 
   try {
     writeFileSync(join(DAILY_DIR, `${date}.json`), JSON.stringify(snapshot, null, 2), 'utf-8')
+    // Set file permissions to 0600 (owner read/write only)
+    try {
+      chmodSync(join(DAILY_DIR, `${date}.json`), 0o600)
+    } catch {
+      // Non-fatal: chmod may fail on Windows
+    }
   } catch {
     // Non-fatal
   }
+
+  // Rotate old cache files (run asynchronously, don't block)
+  setImmediate(() => rotateDailyCache())
 }
 
 /**
@@ -160,7 +226,6 @@ export function readDailySnapshots(
 ): GatewayDailySnapshot[] {
   if (!existsSync(DAILY_DIR)) return []
 
-  const { readdirSync } = require('node:fs') as typeof import('node:fs')
   let files: string[]
   try {
     files = readdirSync(DAILY_DIR)
@@ -243,6 +308,12 @@ export function writeModelSpendCache(
       data,
     }
     writeFileSync(MODEL_SPEND_CACHE_FILE, JSON.stringify(entry, null, 2), 'utf-8')
+    // Set file permissions to 0600 (owner read/write only)
+    try {
+      chmodSync(MODEL_SPEND_CACHE_FILE, 0o600)
+    } catch {
+      // Non-fatal: chmod may fail on Windows
+    }
   } catch {
     /* non-fatal */
   }
@@ -306,6 +377,12 @@ export function writeDailyActivityCache(
       data,
     }
     writeFileSync(DAILY_ACTIVITY_CACHE_FILE, JSON.stringify(entry, null, 2), 'utf-8')
+    // Set file permissions to 0600 (owner read/write only)
+    try {
+      chmodSync(DAILY_ACTIVITY_CACHE_FILE, 0o600)
+    } catch {
+      // Non-fatal: chmod may fail on Windows
+    }
   } catch {
     /* non-fatal */
   }
@@ -316,7 +393,7 @@ export function writeDailyActivityCache(
 function ensureDir(dir: string): void {
   if (!existsSync(dir)) {
     try {
-      mkdirSync(dir, { recursive: true })
+      mkdirSync(dir, { recursive: true, mode: 0o700 }) // Owner only: rwx------
     } catch {
       // ignore — write will fail naturally if dir cannot be created
     }

@@ -164,33 +164,116 @@ export function getDb(dbPath?: string): Database {
   throw new Error('Database not initialized. Call getDbAsync() to initialize.')
 }
 
-export async function getDbAsync(dbPath?: string): Promise<Database> {
+/**
+ * Verifies database is accessible by running a simple test query.
+ * Returns true if database is working, false otherwise.
+ */
+export async function verifyDatabaseAccess(dbPath?: string): Promise<boolean> {
+  const path = dbPath ?? getDefaultDbPath()
+
+  try {
+    const { type, module } = await initDatabase()
+    let testDb: any
+
+    if (type === 'bun') {
+      testDb = new module(path, { readonly: true })
+    } else if (type === 'better-sqlite3') {
+      testDb = new module(path)
+    } else {
+      // sql.js
+      const fileBuffer = readFileSync(path)
+      testDb = new module.Database(fileBuffer)
+    }
+
+    // Run a simple test query
+    const wrapper =
+      type === 'bun'
+        ? createBunWrapper(module, path)
+        : type === 'better-sqlite3'
+          ? createBetterSqlite3Wrapper(testDb)
+          : createSqlJsWrapper(testDb)
+
+    const result = wrapper.prepare<{ test: number }>('SELECT 1 as test').get()
+
+    // Cleanup
+    if (testDb.close) testDb.close()
+
+    return result !== undefined && result !== null && result.test === 1
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Opens database with retry logic for "database is locked" errors.
+ * Retries up to 3 times with exponential backoff (100ms, 500ms, 1000ms).
+ */
+export async function getDbAsync(dbPath?: string, maxRetries = 3): Promise<Database> {
   if (_db) return _db
 
   const path = dbPath ?? getDefaultDbPath()
   validateDbPath(path)
 
-  const { type, module } = await initDatabase()
+  let lastError: Error | undefined
 
-  if (type === 'bun') {
-    // Bun: opens file directly, no memory loading, fastest
-    const bunDb = new module(path, { readonly: true })
-    _rawDb = bunDb
-    _db = createBunWrapper(module, path)
-  } else if (type === 'better-sqlite3') {
-    // better-sqlite3: opens file directly, no memory loading
-    const rawDb = new module(path)
-    _rawDb = rawDb
-    _db = createBetterSqlite3Wrapper(rawDb)
-  } else {
-    // sql.js: must load entire file into memory
-    const fileBuffer = readFileSync(path)
-    const rawDb = new module.Database(fileBuffer)
-    _rawDb = rawDb
-    _db = createSqlJsWrapper(rawDb)
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      const { type, module } = await initDatabase()
+
+      if (type === 'bun') {
+        // Bun: opens file directly, no memory loading, fastest
+        const bunDb = new module(path, { readonly: true })
+        _rawDb = bunDb
+        _db = createBunWrapper(module, path)
+      } else if (type === 'better-sqlite3') {
+        // better-sqlite3: opens file directly, no memory loading
+        const rawDb = new module(path)
+        _rawDb = rawDb
+        _db = createBetterSqlite3Wrapper(rawDb)
+      } else {
+        // sql.js: must load entire file into memory
+        const fileBuffer = readFileSync(path)
+        const rawDb = new module.Database(fileBuffer)
+        _rawDb = rawDb
+        _db = createSqlJsWrapper(rawDb)
+      }
+
+      // Verify the database is working
+      const testResult = _db.prepare<{ test: number }>('SELECT 1 as test').get()
+      if (testResult === undefined || testResult === null || testResult.test !== 1) {
+        throw new Error('Database verification failed')
+      }
+
+      return _db
+    } catch (error) {
+      lastError = error as Error
+
+      // Check if it's a "database is locked" error
+      const errorMessage = lastError.message?.toLowerCase() || ''
+      const isLockedError =
+        errorMessage.includes('database is locked') ||
+        errorMessage.includes('busy') ||
+        errorMessage.includes('locked')
+
+      if (isLockedError && attempt < maxRetries - 1) {
+        // Exponential backoff: 100ms, 500ms, 1000ms
+        const delay = [100, 500, 1000][attempt] || 1000
+        console.warn(
+          `Database locked, retrying in ${delay}ms... (attempt ${attempt + 1}/${maxRetries})`
+        )
+        await new Promise(resolve => setTimeout(resolve, delay))
+
+        // Reset state for retry
+        _db = null
+        _rawDb = null
+      } else {
+        // Not a locked error or last attempt - throw
+        break
+      }
+    }
   }
 
-  return _db
+  throw lastError || new Error('Failed to open database after multiple attempts')
 }
 
 export function closeDb(): void {
