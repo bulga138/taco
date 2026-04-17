@@ -23,6 +23,9 @@ on:
         required: false
         default: 'npm,pnpm,yarn'
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   test-package-managers:
     name: Test ${{ matrix.package-manager }} + Node ${{ matrix.node-version }} (${{ matrix.os }})
