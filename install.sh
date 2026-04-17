@@ -198,7 +198,12 @@ download_binary() {
     if curl -fsSL --connect-timeout 10 -m 30 "$checksum_url" -o "$checksum_file" 2>/dev/null; then
       info "Verifying checksum..."
       local expected_checksum=$(awk '{print $1}' "$checksum_file")
-      local actual_checksum=$(sha256sum "$tmp_file" | awk '{print $1}')
+      local actual_checksum
+      if command -v sha256sum >/dev/null 2>&1; then
+        actual_checksum=$(sha256sum "$tmp_file" | awk '{print $1}')
+      else
+        actual_checksum=$(shasum -a 256 "$tmp_file" | awk '{print $1}')
+      fi
       
       if [[ "$expected_checksum" == "$actual_checksum" ]]; then
         success "Checksum verified"

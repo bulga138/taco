@@ -69,6 +69,7 @@ jobs:
     permissions:
       contents: write
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
@@ -152,8 +153,15 @@ jobs:
           else
             VERSION=${GITHUB_REF#refs/tags/}
           fi
-          sha256sum "taco-${VERSION}-${{ matrix.os_name }}-${{ matrix.arch }}${{ matrix.ext }}" > "taco-${VERSION}-${{ matrix.os_name }}-${{ matrix.arch }}.sha256"
-          cat "taco-${VERSION}-${{ matrix.os_name }}-${{ matrix.arch }}.sha256"
+          BINARY="taco-${VERSION}-${{ matrix.os_name }}-${{ matrix.arch }}${{ matrix.ext }}"
+          CHECKSUM_FILE="taco-${VERSION}-${{ matrix.os_name }}-${{ matrix.arch }}.sha256"
+          # sha256sum is Linux-only; macOS uses shasum -a 256
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "$BINARY" > "$CHECKSUM_FILE"
+          else
+            shasum -a 256 "$BINARY" > "$CHECKSUM_FILE"
+          fi
+          cat "$CHECKSUM_FILE"
         shell: bash
 
       - name: Upload checksum
