@@ -12,7 +12,20 @@ import { registerTuiCommand } from './commands/tui.js'
 import { registerTodayCommand } from './commands/today.js'
 import { registerConfigCommand } from './commands/config-cmd.js'
 import { registerHealthCommand } from './commands/health.js'
-import packageJson from '../../package.json' with { type: 'json' }
+import { readFileSync } from 'fs'
+import { fileURLToPath } from 'url'
+import { dirname, join } from 'path'
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = dirname(__filename)
+
+let packageJsonPath: string
+if (__dirname.includes('dist')) {
+  packageJsonPath = join(__dirname, '../../../package.json')
+} else {
+  packageJsonPath = join(__dirname, '../../package.json')
+}
+const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8'))
 
 // ── Braille art embedded as a constant
 /* prettier-ignore */

@@ -11,23 +11,24 @@
 #   ./install.sh --local    # Local install only (default)
 # =============================================================================
 
-set -euo pipefail
+set -uo pipefail
+
+REPO="bulga138/taco"
 
 # --- Remote bootstrap: detect piped execution (curl | bash) ---
 # When piped, BASH_SOURCE[0] is empty — no local repo files exist.
 # Download the latest release archive and re-exec from the extracted dir.
 if [[ -z "${BASH_SOURCE[0]:-}" ]] || [[ "${BASH_SOURCE[0]}" == "bash" ]]; then
-  REPO="bulga138/taco"
   GITHUB_API="https://api.github.com/repos/${REPO}/releases/latest"
 
   command -v curl &>/dev/null || { echo "Error: curl is required"; exit 1; }
   command -v tar  &>/dev/null || { echo "Error: tar is required"; exit 1; }
 
   echo "Fetching latest TACO release..."
-  LATEST_TAG=$(curl -fsSL "$GITHUB_API" | grep -o '"tag_name": "[^"]*"' | cut -d'"' -f4)
+  LATEST_TAG=$(curl -fsSL -H "User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" "$GITHUB_API" | grep -o '"tag_name": "[^"]*"' | cut -d'"' -f4 || true)
   if [[ -z "$LATEST_TAG" ]]; then
-    echo "Error: Could not determine latest release from GitHub"
-    exit 1
+    echo "  [WARN] Could not determine latest release from GitHub API. Falling back to v0.1.3"
+    LATEST_TAG="v0.1.4"
   fi
 
   ARCHIVE_URL="https://github.com/${REPO}/releases/download/${LATEST_TAG}/taco-release-${LATEST_TAG}.tar.gz"
@@ -35,12 +36,13 @@ if [[ -z "${BASH_SOURCE[0]:-}" ]] || [[ "${BASH_SOURCE[0]}" == "bash" ]]; then
   trap 'rm -rf "$TEMP_DIR"' EXIT
 
   echo "Downloading TACO ${LATEST_TAG}..."
-  curl -fsSL "$ARCHIVE_URL" | tar xz -C "$TEMP_DIR"
+  export LATEST_TAG
+  curl -fsSL -H "User-Agent: Mozilla/5.0" "$ARCHIVE_URL" | tar xz -C "$TEMP_DIR"
 
   # Re-exec from the extracted archive — BASH_SOURCE[0] will be a real path
-  exec bash "$TEMP_DIR/install.sh" "$@"
-fi
-
+  export REPO
+  bash "$TEMP_DIR/install.sh" "$@"
+else
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # --- Colors ---
@@ -181,13 +183,13 @@ download_binary() {
   
   # Check if binary exists (HEAD request with retry)
   local http_code
-  http_code=$(curl -fsSL -o /dev/null -w "%{http_code}" -m 10 "$binary_url" 2>/dev/null) || http_code="000"
+  http_code=$(curl -fsSL -H "User-Agent: Mozilla/5.0" -o /dev/null -w "%{http_code}" -m 10 "$binary_url" 2>/dev/null) || http_code="000"
   
   if [[ "$http_code" == "200" ]]; then
     info "Downloading pre-built binary..."
     local tmp_file="${install_dir}/${binary_name}.tmp"
     
-    if ! curl -fsSL --connect-timeout 30 --max-time 300 "$binary_url" -o "$tmp_file"; then
+    if ! curl -fsSL -H "User-Agent: Mozilla/5.0" --connect-timeout 30 --max-time 300 "$binary_url" -o "$tmp_file"; then
       warn "Download failed (HTTP $http_code), will build from source instead"
       rm -f "$tmp_file"
       return 1
@@ -195,7 +197,7 @@ download_binary() {
     
     # Download and verify checksum if available
     local checksum_file="${install_dir}/${binary_name}.sha256"
-    if curl -fsSL --connect-timeout 10 -m 30 "$checksum_url" -o "$checksum_file" 2>/dev/null; then
+    if curl -fsSL -H "User-Agent: Mozilla/5.0" --connect-timeout 10 -m 30 "$checksum_url" -o "$checksum_file" 2>/dev/null; then
       info "Verifying checksum..."
       local expected_checksum=$(awk '{print $1}' "$checksum_file")
       local actual_checksum
@@ -534,4 +536,5 @@ info "Warming cache..."
 if ! command -v taco &>/dev/null; then
   info "Restart your terminal or run: source ${SHELL_RC:-~/.zshrc}"
   info "Then try: taco"
+fi
 fi

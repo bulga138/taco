@@ -26,7 +26,7 @@ if (-not $MyInvocation.MyCommand.Path) {
         $LatestTag = $Release.tag_name
     } catch {
         Write-Host "Error: Could not determine latest release from GitHub" -ForegroundColor Red
-        exit 1
+        return
     }
 
     $ArchiveUrl = "https://github.com/$Repo/releases/download/$LatestTag/taco-release-$LatestTag.tar.gz"
@@ -40,10 +40,10 @@ if (-not $MyInvocation.MyCommand.Path) {
 
         if (Get-Command tar -ErrorAction SilentlyContinue) {
             tar -xzf $ArchivePath -C $TempDir
-        } else {
-            Write-Host "Error: 'tar' not found. Please install tar or use PowerShell 7+." -ForegroundColor Red
-            exit 1
-        }
+            } else {
+                Write-Host "Error: 'tar' not found. Please install tar or use PowerShell 7+." -ForegroundColor Red
+                return
+            }
 
         $ExtractedScript = Join-Path $TempDir "install.ps1"
         if (Test-Path $ExtractedScript) {
@@ -52,15 +52,13 @@ if (-not $MyInvocation.MyCommand.Path) {
             & $ExtractedScript @ScriptArgs
         } else {
             Write-Host "Error: install.ps1 not found in downloaded archive" -ForegroundColor Red
-            exit 1
+            return
         }
     } finally {
         Remove-Item -Path $TempDir -Recurse -Force -ErrorAction SilentlyContinue
     }
-    exit $LASTEXITCODE
-}
-
-if ($Help) {
+} else {
+    if ($Help) {
     Write-Host @"
 Usage: .\install.ps1 [OPTIONS]
 
@@ -76,7 +74,7 @@ Examples:
   .\install.ps1 -System     # System-wide install
   .\install.ps1 -PreferSource  # Build from source
 "@
-    exit 0
+    return
 }
 
 # Colors
@@ -90,7 +88,7 @@ $Reset = "`e[0m"
 function Info { param($msg) Write-Host "${Cyan}  ->${Reset} $msg" }
 function Success { param($msg) Write-Host "${Green}  [OK]${Reset} $msg" }
 function Warn { param($msg) Write-Host "${Yellow}  [WARN]${Reset} $msg" }
-function Error { param($msg) Write-Host "${Red}  [ERROR]${Reset} $msg" -ForegroundColor Red; exit 1 }
+function Error { param($msg) Write-Host "${Red}  [ERROR]${Reset} $msg" -ForegroundColor Red; throw "Installation failed" }
 
 # Offer to install Bun if not already present
 function Prompt-InstallBun {
@@ -529,3 +527,4 @@ if (-not (Get-Command taco -ErrorAction SilentlyContinue)) {
 }
 
 Write-Host ""
+}

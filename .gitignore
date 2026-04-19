@@ -7,3 +7,7 @@ build
 *.tar.gz
 *.zip
 *.tgz
+
+# Test fixtures
+tests/.fixture-tmp/
+*.db
