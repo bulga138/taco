@@ -103,13 +103,24 @@ jobs:
       - name: Rename executable
         run: |
           VERSION=${GITHUB_REF_NAME#v}
-          mv taco "taco-${VERSION}-${{ matrix.os_name }}-${{ matrix.arch }}${{ matrix.ext }}"
+          if [ -f taco.exe ]; then
+            mv taco.exe "taco-${VERSION}-${{ matrix.os_name }}-${{ matrix.arch }}.exe"
+          elif [ -f taco ]; then
+            mv taco "taco-${VERSION}-${{ matrix.os_name }}-${{ matrix.arch }}"
+          else
+            echo "ERROR: Neither taco nor taco.exe exists!"
+            exit 1
+          fi
         shell: bash
 
       - name: Generate checksum
         run: |
           VERSION=${GITHUB_REF_NAME#v}
-          BINARY="taco-${VERSION}-${{ matrix.os_name }}-${{ matrix.arch }}${{ matrix.ext }}"
+          if [ -f "taco-${VERSION}-${{ matrix.os_name }}-${{ matrix.arch }}.exe" ]; then
+            BINARY="taco-${VERSION}-${{ matrix.os_name }}-${{ matrix.arch }}.exe"
+          else
+            BINARY="taco-${VERSION}-${{ matrix.os_name }}-${{ matrix.arch }}"
+          fi
           CHECKSUM_FILE="taco-${VERSION}-${{ matrix.os_name }}-${{ matrix.arch }}.sha256"
           if command -v sha256sum >/dev/null 2>&1; then
             sha256sum "$BINARY" > "$CHECKSUM_FILE"
@@ -118,14 +129,21 @@ jobs:
           fi
         shell: bash
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+      - name: Upload executable to release
+        uses: softprops/action-gh-release@v3.0.0
         with:
-          name: ${{ matrix.target }}
-          path: |
-            taco*
-            *.sha256
-          if-no-files-found: error
+          files: taco-v*-*
+          generate_release_notes: ${{ matrix.target == 'linux-x64' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload checksum to release
+        uses: softprops/action-gh-release@v3.0.0
+        with:
+          files: taco-*.sha256
+          generate_release_notes: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   create-source-archive:
     name: Create Source Archive
@@ -168,54 +186,10 @@ jobs:
             package.json \
             LICENSE 2>/dev/null || true
 
-      - name: Upload source archive
-        uses: actions/upload-artifact@v4
-        with:
-          name: source-archive
-          path: taco-release-*.tar.gz
-
-  generate-changelog:
-    name: Generate Changelog
-    runs-on: ubuntu-latest
-    outputs:
-      changelog: ${{ steps.changelog.outputs.content }}
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
-      - name: Generate changelog
-        id: changelog
-        run: |
-          chmod +x scripts/generate-changelog.sh
-          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
-          CHANGELOG=$(./scripts/generate-changelog.sh "$PREV_TAG")
-          echo "content<<EOF" >> $GITHUB_OUTPUT
-          echo "$CHANGELOG" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-
-  create-release:
-    name: Create GitHub Release
-    needs: [build, create-source-archive, generate-changelog]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-
-      - name: Create GitHub Release
+      - name: Upload source archive to release
         uses: softprops/action-gh-release@v3.0.0
         with:
-          body: ${{ needs.generate-changelog.outputs.changelog }}
-          files: |
-            artifacts/taco-*
-            artifacts/*.sha256
-            artifacts/**/*.tar.gz
+          files: taco-release-*.tar.gz
           generate_release_notes: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
