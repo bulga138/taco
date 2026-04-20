@@ -17,18 +17,49 @@ REPO="bulga138/taco"
 
 # --- Remote bootstrap: detect piped execution (curl | bash) ---
 # When piped, BASH_SOURCE[0] is empty — no local repo files exist.
-# Download the latest release archive and re-exec from the extracted dir.
+# Download the requested (or latest) release archive and re-exec from the extracted dir.
+#
+# Install specific version:
+#   curl -sSL https://raw.githubusercontent.com/bulga138/taco/master/install.sh | bash -s -- --version v0.1.3
+# Install latest:
+#   curl -sSL https://raw.githubusercontent.com/bulga138/taco/master/install.sh | bash
 if [[ -z "${BASH_SOURCE[0]:-}" ]] || [[ "${BASH_SOURCE[0]}" == "bash" ]]; then
-  GITHUB_API="https://api.github.com/repos/${REPO}/releases/latest"
-
   command -v curl &>/dev/null || { echo "Error: curl is required"; exit 1; }
   command -v tar  &>/dev/null || { echo "Error: tar is required"; exit 1; }
 
-  echo "Fetching latest TACO release..."
-  LATEST_TAG=$(curl -fsSL -H "User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" "$GITHUB_API" | grep -o '"tag_name": "[^"]*"' | cut -d'"' -f4 || true)
-  if [[ -z "$LATEST_TAG" ]]; then
-    echo "  [WARN] Could not determine latest release from GitHub API. Falling back to v0.1.3"
-    LATEST_TAG="v0.1.4"
+  # Allow caller to pin a version: --version v0.1.3
+  REQUESTED_VERSION=""
+  for _arg in "$@"; do
+    case "$_arg" in
+      --version=*) REQUESTED_VERSION="${_arg#--version=}" ;;
+    esac
+  done
+  # Also handle --version <value> (two-argument form)
+  _prev=""
+  for _arg in "$@"; do
+    [[ "$_prev" == "--version" ]] && { REQUESTED_VERSION="$_arg"; break; }
+    _prev="$_arg"
+  done
+
+  if [[ -n "$REQUESTED_VERSION" ]]; then
+    # Normalise: ensure it starts with 'v'
+    [[ "$REQUESTED_VERSION" == v* ]] || REQUESTED_VERSION="v${REQUESTED_VERSION}"
+    LATEST_TAG="$REQUESTED_VERSION"
+    echo "Installing TACO ${LATEST_TAG} (pinned)..."
+  else
+    # Discover latest tag via git ls-remote — no API rate limits
+    echo "Fetching latest TACO release..."
+    LATEST_TAG=$(git ls-remote --tags "https://github.com/${REPO}.git" 2>/dev/null \
+      | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+$' \
+      | sort -V \
+      | tail -1 || true)
+    if [[ -z "$LATEST_TAG" ]]; then
+      echo "  [ERROR] Could not determine latest release. Check your internet connection."
+      echo "  To install a specific version, run:"
+      echo "    curl -sSL https://raw.githubusercontent.com/${REPO}/master/install.sh | bash -s -- --version v0.1.4"
+      exit 1
+    fi
+    echo "Latest release: ${LATEST_TAG}"
   fi
 
   ARCHIVE_URL="https://github.com/${REPO}/releases/download/${LATEST_TAG}/taco-release-${LATEST_TAG}.tar.gz"
@@ -414,6 +445,8 @@ EOF
   rm -rf "$INSTALL_DIR/dist"
   cp -r "$REPO_DIR/dist" "$INSTALL_DIR/"
   chmod +x "$INSTALL_DIR/dist/bin/taco.js" 2>/dev/null || true
+  # Remove dist/package.json so version is read from the correct $INSTALL_DIR/package.json
+  rm -f "$INSTALL_DIR/dist/package.json"
   if [[ -f "$REPO_DIR/uninstall.sh" ]]; then
     cp "$REPO_DIR/uninstall.sh" "$INSTALL_DIR/"
     chmod +x "$INSTALL_DIR/uninstall.sh"
@@ -432,6 +465,8 @@ EOF
   rm -rf "$INSTALL_DIR/dist"
   cp -r "$REPO_DIR/dist" "$INSTALL_DIR/"
   chmod +x "$INSTALL_DIR/dist/bin/taco.js" 2>/dev/null || true
+  # Remove dist/package.json so version is read from the correct $INSTALL_DIR/package.json
+  rm -f "$INSTALL_DIR/dist/package.json"
 
   # Copy package.json, uninstall script, and install dependencies
   cp "$REPO_DIR/package.json" "$INSTALL_DIR/"
@@ -473,6 +508,28 @@ if [[ "$LOCAL_INSTALL" == "true" ]] && [[ "$INSTALL_DIR" == "${HOME}/.taco" ]]; 
   if [[ -n "$SHELL_RC" ]] && ! grep -q "\.taco" "$SHELL_RC" 2>/dev/null; then
     echo 'export PATH="$HOME/.taco:$PATH"' >> "$SHELL_RC"
     info "Added ~/.taco to PATH in $SHELL_RC for future sessions"
+  fi
+
+  # --- Install shell completions ---
+  # Append eval "$(taco completion)" to the shell rc if not already present.
+  # This works for bash and zsh; fish users get a separate message.
+  if [[ -n "$SHELL_RC" ]] && ! grep -q "taco completion" "$SHELL_RC" 2>/dev/null; then
+    echo '' >> "$SHELL_RC"
+    echo '# taco shell completions' >> "$SHELL_RC"
+    echo 'eval "$(taco completion)" 2>/dev/null || true' >> "$SHELL_RC"
+    success "Shell completions installed in $SHELL_RC"
+    info "Run 'source $SHELL_RC' or open a new terminal to activate tab completion"
+  elif [[ -n "$SHELL_RC" ]]; then
+    info "Shell completions already present in $SHELL_RC"
+  fi
+
+  # Fish shell: write completion file directly
+  if [[ "$SHELL" == *fish* ]] || command -v fish &>/dev/null; then
+    FISH_COMP_DIR="$HOME/.config/fish/completions"
+    if [[ -d "$FISH_COMP_DIR" ]] || mkdir -p "$FISH_COMP_DIR" 2>/dev/null; then
+      "$INSTALL_DIR/taco" completion --fish > "$FISH_COMP_DIR/taco.fish" 2>/dev/null && \
+        success "Fish completions installed: $FISH_COMP_DIR/taco.fish"
+    fi
   fi
 fi
 

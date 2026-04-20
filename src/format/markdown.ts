@@ -148,12 +148,13 @@ export function formatDailyMarkdown(daily: DailyStats[], label: string): string 
   return lines.join('\n')
 }
 
-export function formatProjectsMarkdown(projects: ProjectStats[], label: string): string {
+export function formatProjectsMarkdown(projects: ProjectStats[], label: string, hasGateway = false): string {
+  const costHeader = hasGateway ? 'Local $' : 'Cost'
   const lines: string[] = [
     `# 🌮 TACO — Projects${label ? ` · ${label}` : ''}`,
     '',
-    '| Project | Sessions | Messages | Tokens | Cost |',
-    '|---------|----------|----------|--------|------|',
+    `| Project | Sessions | Messages | Tokens | ${costHeader} |`,
+    `|---------|----------|----------|--------|${'-'.repeat(costHeader.length + 2)}|`,
   ]
   for (const p of projects) {
     lines.push(
@@ -164,12 +165,13 @@ export function formatProjectsMarkdown(projects: ProjectStats[], label: string):
   return lines.join('\n')
 }
 
-export function formatSessionsMarkdown(sessions: SessionStats[], label: string): string {
+export function formatSessionsMarkdown(sessions: SessionStats[], label: string, hasGateway = false): string {
+  const costHeader = hasGateway ? 'Local $' : 'Cost'
   const lines: string[] = [
     `# 🌮 TACO — Sessions${label ? ` · ${label}` : ''}`,
     '',
-    '| Title | Created | Messages | Tokens | Cost | Duration |',
-    '|-------|---------|----------|--------|------|----------|',
+    `| Title | Created | Messages | Tokens | ${costHeader} | Duration |`,
+    `|-------|---------|----------|--------|${'-'.repeat(costHeader.length + 2)}|----------|`,
   ]
   for (const s of sessions) {
     lines.push(
@@ -180,12 +182,13 @@ export function formatSessionsMarkdown(sessions: SessionStats[], label: string):
   return lines.join('\n')
 }
 
-export function formatAgentsMarkdown(agents: AgentStats[], label: string): string {
+export function formatAgentsMarkdown(agents: AgentStats[], label: string, hasGateway = false): string {
+  const costHeader = hasGateway ? 'Local $' : 'Cost'
   const lines: string[] = [
     `# 🌮 TACO — Agents${label ? ` · ${label}` : ''}`,
     '',
-    '| Agent | Messages | Tokens | Cost | Share |',
-    '|-------|----------|--------|------|-------|',
+    `| Agent | Messages | Tokens | ${costHeader} | Share |`,
+    `|-------|----------|--------|${'-'.repeat(costHeader.length + 2)}|-------|`,
   ]
   for (const a of agents) {
     lines.push(
@@ -196,12 +199,14 @@ export function formatAgentsMarkdown(agents: AgentStats[], label: string): strin
   return lines.join('\n')
 }
 
-export function formatTrendsMarkdown(trends: PeriodStats[], period: string, label: string): string {
+export function formatTrendsMarkdown(trends: PeriodStats[], period: string, label: string, hasGateway = false): string {
+  const costHeader = hasGateway ? 'Local $' : 'Cost'
+  const deltaCostHeader = hasGateway ? 'Δ Local $' : 'Δ Cost'
   const lines: string[] = [
     `# 🌮 TACO — Trends · ${period}${label ? ` · ${label}` : ''}`,
     '',
-    '| Period | Sessions | Messages | Tokens | Cost | Δ Cost |',
-    '|--------|----------|----------|--------|------|--------|',
+    `| Period | Sessions | Messages | Tokens | ${costHeader} | ${deltaCostHeader} |`,
+    `|--------|----------|----------|--------|${'-'.repeat(costHeader.length + 2)}|${'-'.repeat(deltaCostHeader.length + 2)}|`,
   ]
   for (const t of trends) {
     const delta =

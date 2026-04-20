@@ -106,7 +106,20 @@ export function registerTuiCommand(program: Command): void {
         let activeTab = 0
         const tabs = ['Overview', 'Models', 'Providers', 'Sessions']
         let modelsScrollOffset = 0
-        const MODELS_PER_PAGE = 3
+
+        // Chrome lines that are always rendered regardless of tab content:
+        //   header, blank, tab bar, top divider, bottom divider, footer = 6
+        const CHROME_LINES = 6
+
+        /** Compute how many model panels fit in the current terminal. */
+        function currentModelsPerPage(): number {
+          const rows = process.stdout.rows || 24
+          const availableRows = Math.max(4, rows - CHROME_LINES)
+          const useCompact = (process.stdout.columns || 80) < 100
+          const modelsChrome = 7
+          const linesPerModel = useCompact ? 3 : 9
+          return Math.max(1, Math.floor((availableRows - modelsChrome) / linesPerModel))
+        }
 
         // Check if running in a TTY before enabling raw mode
         if (!process.stdin.isTTY) {
@@ -204,75 +217,80 @@ export function registerTuiCommand(program: Command): void {
           return content
         }
 
-        function renderContent(uiWidth: number) {
+        function renderContent(uiWidth: number, availableRows: number) {
           let content = ''
 
           if (activeTab === 0) {
             modelsScrollOffset = 0
-            content = `\n${COLORS.label.bold('Overview')}\n\n`
 
-            content += `${COLORS.label('Total Tokens:')}     ${COLORS.highlight(formatTokens(overview.tokens.total))}\n`
-            content += `${COLORS.label('Total Sessions:')}   ${COLORS.info(overview.sessionCount.toString())}\n`
-            content += `${COLORS.label(config.gateway ? 'Local Cost:' : 'Total Cost:')}       ${COLORS.warning('$' + overview.cost.toFixed(4))}\n`
+            // ── Overview tab — height-aware section trimming ──────────────────
+            // Build sections in priority order (highest priority = kept longest).
+            // When the terminal is short we drop lowest-priority sections first.
+
+            // KV block — always shown (core data), ~8-9 lines
+            let kvBlock = `\n${COLORS.label.bold('Overview')}\n\n`
+            kvBlock += `${COLORS.label('Total Tokens:')}     ${COLORS.highlight(formatTokens(overview.tokens.total))}\n`
+            kvBlock += `${COLORS.label('Total Sessions:')}   ${COLORS.info(overview.sessionCount.toString())}\n`
+            kvBlock += `${COLORS.label(config.gateway ? 'Local Cost:' : 'Total Cost:')}       ${COLORS.warning('$' + overview.cost.toFixed(4))}\n`
             if (gatewayMetrics) {
               const diff = overview.cost - gatewayMetrics.totalSpend
               const diffStr =
                 diff >= 0
                   ? COLORS.muted(`  (+$${diff.toFixed(2)} vs gateway)`)
                   : COLORS.muted(`  (-$${Math.abs(diff).toFixed(2)} vs gateway)`)
-              content += `${COLORS.label('Gateway Cost:')}     ${COLORS.info('$' + gatewayMetrics.totalSpend.toFixed(4))}${diffStr}\n`
+              kvBlock += `${COLORS.label('Gateway Cost:')}     ${COLORS.info('$' + gatewayMetrics.totalSpend.toFixed(4))}${diffStr}\n`
             }
-            content += `${COLORS.label('Active Days:')}      ${overview.activedays}/${overview.totalDays}\n`
-            content += `${COLORS.label('Current Streak:')}   ${overview.currentStreak} days\n\n`
+            kvBlock += `${COLORS.label('Active Days:')}      ${overview.activedays}/${overview.totalDays}\n`
+            kvBlock += `${COLORS.label('Current Streak:')}   ${overview.currentStreak} days\n\n`
 
+            // Top Models section — priority 3 (drop fourth)
+            let topModelsBlock = ''
             if (modelStats.length > 0) {
               const topModels = modelStats.slice(0, 3).map(m => ({
                 name: m.modelId.split('/').pop() || m.modelId,
                 value: `${(m.percentage * 100).toFixed(1)}%`,
                 detail: `(${formatTokens(m.tokens.total)})`,
               }))
-              content += renderTop3Section('Top Models', topModels) + '\n'
+              topModelsBlock = renderTop3Section('Top Models', topModels) + '\n'
             }
 
+            // Top Providers section — priority 2 (drop third)
+            let topProvidersBlock = ''
             if (providerStats.length > 0) {
               const topProviders = providerStats.slice(0, 3).map(p => {
-                // For providers with non-zero local cost and gateway data available,
-                // show both local and gateway totals. Gateway spend is per-model and
-                // routes through cloud providers; aggregate total maps to the main provider.
                 let detail: string
                 if (gatewayMetrics && p.cost > 0 && p.cost >= overview.cost * 0.5) {
-                  // This is the primary provider (majority of local spend); show gateway total
                   detail = `(local $${p.cost.toFixed(2)} | gw $${gatewayMetrics.totalSpend.toFixed(2)})`
                 } else {
                   detail = `($${p.cost.toFixed(2)})`
                 }
-                return {
-                  name: p.providerId,
-                  value: `${(p.percentage * 100).toFixed(1)}%`,
-                  detail,
-                }
+                return { name: p.providerId, value: `${(p.percentage * 100).toFixed(1)}%`, detail }
               })
-              content += renderTop3Section('Top Providers', topProviders) + '\n'
+              topProvidersBlock = renderTop3Section('Top Providers', topProviders) + '\n'
             }
 
+            // Recent Sessions section — priority 1 (drop second)
+            let topSessionsBlock = ''
             if (sessionStats.length > 0) {
               const topSessions = sessionStats.slice(0, 3).map(s => ({
                 name: (s.title || s.sessionId.substring(0, 8)).substring(0, 25),
                 value: new Date(s.timeCreated).toLocaleDateString(),
               }))
-              content += renderTop3Section('Recent Sessions', topSessions) + '\n'
+              topSessionsBlock = renderTop3Section('Recent Sessions', topSessions) + '\n'
             }
 
-            content += `${COLORS.label.bold('Token Breakdown:')}\n`
-            content += `  ${COLORS.muted('Input:')}      ${formatTokens(overview.tokens.input)}\n`
-            content += `  ${COLORS.muted('Output:')}     ${formatTokens(overview.tokens.output)}\n`
-            content += `  ${COLORS.muted('Cache Read:')} ${formatTokens(overview.tokens.cacheRead)}\n`
-            content += `  ${COLORS.muted('Cache Write:')}${formatTokens(overview.tokens.cacheWrite)}\n`
-            content += `  ${COLORS.muted('Reasoning:')}  ${formatTokens(overview.tokens.reasoning)}\n`
+            // Token Breakdown — priority 0 (drop first)
+            const breakdownBlock =
+              `${COLORS.label.bold('Token Breakdown:')}\n` +
+              `  ${COLORS.muted('Input:')}      ${formatTokens(overview.tokens.input)}\n` +
+              `  ${COLORS.muted('Output:')}     ${formatTokens(overview.tokens.output)}\n` +
+              `  ${COLORS.muted('Cache Read:')} ${formatTokens(overview.tokens.cacheRead)}\n` +
+              `  ${COLORS.muted('Cache Write:')}${formatTokens(overview.tokens.cacheWrite)}\n` +
+              `  ${COLORS.muted('Reasoning:')}  ${formatTokens(overview.tokens.reasoning)}\n`
 
-            // Gateway metrics row (shown when configured and data is available)
+            // Gateway Spend section (only if configured)
+            let gatewayBlock = ''
             if (config.gateway) {
-              content += '\n'
               if (gatewayMetrics) {
                 const gw = gatewayMetrics
                 const spendStr = `$${gw.totalSpend.toFixed(2)}`
@@ -281,41 +299,93 @@ export function registerTuiCommand(program: Command): void {
                     ? ` / $${gw.budgetLimit.toFixed(2)}  (${((gw.totalSpend / gw.budgetLimit) * 100).toFixed(1)}%)`
                     : ''
                 const cacheIndicator = gw.cached ? COLORS.muted(' cached') : COLORS.muted(' live')
-                content += `${COLORS.label.bold('Gateway Spend:')}\n`
-                content += `  ${COLORS.info(spendStr)}${COLORS.muted(budgetStr)}${cacheIndicator}\n`
+                gatewayBlock += `\n${COLORS.label.bold('Gateway Spend:')}\n`
+                gatewayBlock += `  ${COLORS.info(spendStr)}${COLORS.muted(budgetStr)}${cacheIndicator}\n`
                 if (gw.teamSpend !== null) {
                   const teamStr = gw.teamName ? ` (${gw.teamName})` : ''
                   const teamBudget =
                     gw.teamBudgetLimit !== null
                       ? ` / $${gw.teamBudgetLimit.toFixed(2)}  (${((gw.teamSpend / gw.teamBudgetLimit) * 100).toFixed(1)}%)`
                       : ''
-                  content += `  ${COLORS.muted('Team:')} $${gw.teamSpend.toFixed(2)}${COLORS.muted(teamBudget + teamStr)}\n`
+                  gatewayBlock += `  ${COLORS.muted('Team:')} $${gw.teamSpend.toFixed(2)}${COLORS.muted(teamBudget + teamStr)}\n`
                 }
                 const diff = overview.cost - gw.totalSpend
                 const diffStr =
                   diff >= 0
                     ? `+$${diff.toFixed(2)} local vs gateway`
                     : `-$${Math.abs(diff).toFixed(2)} local vs gateway`
-                content += `  ${COLORS.muted(diffStr)}\n`
+                gatewayBlock += `  ${COLORS.muted(diffStr)}\n`
               } else {
-                content += `${COLORS.muted('Gateway: fetching…')}\n`
+                gatewayBlock = `\n${COLORS.muted('Gateway: fetching…')}\n`
               }
             }
+
+            // ── Fit sections to available height ─────────────────────────────
+            // Sections from lowest priority (drop first) to highest (keep last):
+            //   breakdownBlock, topSessionsBlock, topProvidersBlock, topModelsBlock, gatewayBlock, kvBlock
+            // We accumulate sections greedily from the most important ones.
+            const countLines = (s: string) => (s ? s.split('\n').length : 0)
+
+            // Always include kvBlock — it's the minimum viable content.
+            let usedLines = countLines(kvBlock)
+            let showBreakdown = false
+            let showTopModels = false
+            let showTopProviders = false
+            let showTopSessions = false
+            let showGateway = false
+
+            // Add sections in priority order, highest first
+            if (usedLines + countLines(topModelsBlock) <= availableRows) {
+              showTopModels = true
+              usedLines += countLines(topModelsBlock)
+            }
+            if (usedLines + countLines(topProvidersBlock) <= availableRows) {
+              showTopProviders = true
+              usedLines += countLines(topProvidersBlock)
+            }
+            if (usedLines + countLines(topSessionsBlock) <= availableRows) {
+              showTopSessions = true
+              usedLines += countLines(topSessionsBlock)
+            }
+            if (usedLines + countLines(breakdownBlock) <= availableRows) {
+              showBreakdown = true
+              usedLines += countLines(breakdownBlock)
+            }
+            if (usedLines + countLines(gatewayBlock) <= availableRows) {
+              showGateway = true
+            }
+
+            content = kvBlock
+            if (showTopModels) content += topModelsBlock
+            if (showTopProviders) content += topProvidersBlock
+            if (showTopSessions) content += topSessionsBlock
+            if (showBreakdown) content += breakdownBlock
+            if (showGateway) content += gatewayBlock
           } else if (activeTab === 1) {
+            // ── Models tab — dynamic MODELS_PER_PAGE ─────────────────────────
+            // Chart mode: header(2) + scroll-hint(1) + blank(1) + per-panel ~9 lines + pagination(2)
+            // Compact mode: header(2) + scroll-hint(1) + blank(1) + per-model 3 lines + blank(1) + pagination(2)
+            const useCompactView = (process.stdout.columns || 80) < 100
+            const modelsChrome = 7 // header + hint + blank + blank + pagination lines
+            const linesPerModel = useCompactView ? 3 : 9
+            const modelsPerPage = Math.max(1, Math.floor((availableRows - modelsChrome) / linesPerModel))
+
             if (modelStats.length === 0) {
               content = `\n${COLORS.label.bold('Models')}\n\nNo model data available.\n`
               modelsScrollOffset = 0
             } else {
-              content = `\n${COLORS.label.bold('Models')} ${COLORS.muted(`(showing ${Math.min(modelsScrollOffset + 1, modelStats.length)}-${Math.min(modelsScrollOffset + MODELS_PER_PAGE, modelStats.length)} of ${modelStats.length})`)}\n`
+              // Clamp scroll offset to new page size
+              modelsScrollOffset = Math.min(
+                modelsScrollOffset,
+                Math.max(0, modelStats.length - modelsPerPage)
+              )
+              content = `\n${COLORS.label.bold('Models')} ${COLORS.muted(`(showing ${Math.min(modelsScrollOffset + 1, modelStats.length)}-${Math.min(modelsScrollOffset + modelsPerPage, modelStats.length)} of ${modelStats.length})`)}\n`
               content += COLORS.muted('Use ↑/↓ arrows to scroll through models\n\n')
 
               const visibleModels = modelStats.slice(
                 modelsScrollOffset,
-                modelsScrollOffset + MODELS_PER_PAGE
+                modelsScrollOffset + modelsPerPage
               )
-              // Use compact text view when the terminal is too narrow for charts.
-              // Charts need at least 100 columns to be readable.
-              const useCompactView = (process.stdout.columns || 80) < 100
 
               if (useCompactView) {
                 visibleModels.forEach((m, i) => {
@@ -332,30 +402,31 @@ export function registerTuiCommand(program: Command): void {
                 content += panelLines.join('\n')
               }
 
-              if (modelStats.length > MODELS_PER_PAGE) {
+              if (modelStats.length > modelsPerPage) {
                 content +=
                   '\n' +
                   COLORS.muted(
-                    `${modelsScrollOffset > 0 ? '◀ ' : ''}${modelsScrollOffset + 1}-${Math.min(modelsScrollOffset + MODELS_PER_PAGE, modelStats.length)}${modelsScrollOffset + MODELS_PER_PAGE < modelStats.length ? ' ▶' : ''}`
+                    `${modelsScrollOffset > 0 ? '◀ ' : ''}${modelsScrollOffset + 1}-${Math.min(modelsScrollOffset + modelsPerPage, modelStats.length)}${modelsScrollOffset + modelsPerPage < modelStats.length ? ' ▶' : ''}`
                   ) +
                   '\n'
               }
             }
           } else if (activeTab === 2) {
+            // ── Providers tab — cap rows to viewport ─────────────────────────
             modelsScrollOffset = 0
             content = `\n${COLORS.label.bold('Providers')}\n\n`
 
             if (providerStats.length === 0) {
               content += 'No provider data available.\n'
             } else {
-              const maxTokens = providerStats[0]?.tokens.total || 1
-              // Fixed cols: "N. "(3) + tokens(8) + " (XX.X%)"(9) + " $COST"(8) + gaps(6) = ~34
-              // Remaining space split between name col and bar col.
-              // Name col: up to 20 chars, the rest goes to bar (capped at 20).
+              // availableRows minus header (3 lines already in content above)
+              const maxProviders = Math.max(1, availableRows - 4)
+              const visibleProviders = providerStats.slice(0, maxProviders)
+              const maxTokens = visibleProviders[0]?.tokens.total || 1
               const nameWidth = Math.max(8, Math.min(20, Math.floor((uiWidth - 34) * 0.55)))
               const maxBarLen = Math.max(1, Math.min(20, uiWidth - 34 - nameWidth))
 
-              providerStats.forEach((p, i) => {
+              visibleProviders.forEach((p, i) => {
                 const percentage = (p.percentage * 100).toFixed(1)
                 const barLength = Math.min(
                   maxBarLen,
@@ -363,12 +434,10 @@ export function registerTuiCommand(program: Command): void {
                 )
                 const bar = '█'.repeat(barLength)
                 const num = COLORS.highlight(`${i + 1}.`)
-                // Truncate name to nameWidth so it never pushes subsequent columns right
                 const name =
                   p.providerId.length > nameWidth
                     ? p.providerId.slice(0, nameWidth - 1) + '…'
                     : p.providerId.padEnd(nameWidth)
-                // Show gateway total alongside local cost for the primary provider
                 let costDisplay = COLORS.warning(`$${p.cost.toFixed(2)}`)
                 if (gatewayMetrics && p.cost > 0 && p.cost >= overview.cost * 0.5) {
                   costDisplay += COLORS.muted(` gw:$${gatewayMetrics.totalSpend.toFixed(2)}`)
@@ -377,24 +446,24 @@ export function registerTuiCommand(program: Command): void {
               })
             }
           } else if (activeTab === 3) {
+            // ── Sessions tab — cap rows to viewport ──────────────────────────
             modelsScrollOffset = 0
-            const shown = sessionStats.slice(0, 20)
+            // availableRows minus header lines (3 in content) and a small buffer
+            const maxSessions = Math.max(1, Math.min(20, availableRows - 4))
+            const shown = sessionStats.slice(0, maxSessions)
 
             if (shown.length === 0) {
               content = `\n${COLORS.label.bold('Recent Sessions')}\n\nNo session data available.\n`
             } else {
               content = `\n${COLORS.label.bold('Recent Sessions')}\n\n`
 
-              // Compute column widths based on terminal
-              // Row format: "NN. TITLE... DATE   TOK    COST    DUR    MODEL"
-              // Fixed: num(4) date(10) tok(7) cost(7) dur(7) model(18) gaps(10) = 63
               const titleCol = Math.max(10, uiWidth - 65)
 
               shown.forEach((s, i) => {
                 const title = (s.title ?? s.sessionId.substring(0, 8))
                   .padEnd(titleCol)
                   .substring(0, titleCol)
-                const date = new Date(s.timeCreated).toLocaleDateString('en-CA') // YYYY-MM-DD
+                const date = new Date(s.timeCreated).toLocaleDateString('en-CA')
                 const tok = formatTokens(s.tokens.total).padStart(6)
                 const cost = `$${s.cost.toFixed(2)}`.padStart(6)
                 const dur = s.durationMs != null ? formatDur(s.durationMs).padStart(6) : '     -'
@@ -418,6 +487,10 @@ export function registerTuiCommand(program: Command): void {
           clearScreen()
 
           const cols = process.stdout.columns || 80
+          const rows = process.stdout.rows || 24
+          // availableRows is the space left for tab content after fixed chrome.
+          const availableRows = Math.max(4, rows - CHROME_LINES)
+
           // Dividers are kept at ≤70 chars so they look tidy.
           const dividerWidth = Math.min(70, cols - 2)
           // Content grows with the terminal up to 100 cols — beyond that charts
@@ -430,7 +503,7 @@ export function registerTuiCommand(program: Command): void {
             '',
             renderTabs(),
             COLORS.border('─'.repeat(dividerWidth)),
-            renderContent(contentWidth),
+            renderContent(contentWidth, availableRows),
             COLORS.border('─'.repeat(dividerWidth)),
             COLORS.muted(
               '←/→ or Tab to switch tabs | 1-4 jump | q to quit' +
@@ -513,7 +586,7 @@ export function registerTuiCommand(program: Command): void {
                 return
               } else if (
                 arrowCode === 66 &&
-                modelsScrollOffset + MODELS_PER_PAGE < modelStats.length
+                modelsScrollOffset + currentModelsPerPage() < modelStats.length
               ) {
                 // Down
                 modelsScrollOffset++

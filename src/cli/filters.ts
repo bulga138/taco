@@ -1,4 +1,4 @@
-import type { Command } from 'commander'
+import { Command, Option } from 'commander'
 
 /**
  * Attach the shared filter flags to a Commander command.
@@ -11,7 +11,10 @@ export function addFilterFlags(cmd: Command): Command {
     .option('--provider <name>', 'Filter to a specific provider')
     .option('--project <path>', 'Filter to a specific project directory')
     .option('--agent <type>', 'Filter by agent type (build, plan, explore)')
-    .option('--format <format>', 'Output format: visual, json, csv, markdown (default: visual)')
+    .addOption(
+      new Option('--format <format>', 'Output format (default: visual)')
+        .choices(['visual', 'json', 'csv', 'markdown'])
+    )
     .option('--db <path>', 'Override OpenCode database path')
 }
 

@@ -12,20 +12,63 @@ import { registerTuiCommand } from './commands/tui.js'
 import { registerTodayCommand } from './commands/today.js'
 import { registerConfigCommand } from './commands/config-cmd.js'
 import { registerHealthCommand } from './commands/health.js'
-import { readFileSync } from 'fs'
+import { registerUpdateCommand } from './commands/update.js'
+import { registerCompletionCommand } from './commands/completion.js'
+import { existsSync, readFileSync } from 'fs'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
 
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = dirname(__filename)
-
-let packageJsonPath: string
-if (__dirname.includes('dist')) {
-  packageJsonPath = join(__dirname, '../../../package.json')
-} else {
-  packageJsonPath = join(__dirname, '../../package.json')
+/**
+ * Walk up from a starting directory until package.json is found.
+ * Returns the path to package.json or null if not found within maxDepth levels.
+ */
+function findPackageJsonFrom(start: string, maxDepth = 5): string | null {
+  let dir = start
+  for (let i = 0; i < maxDepth; i++) {
+    const candidate = join(dir, 'package.json')
+    if (existsSync(candidate)) return candidate
+    const parent = dirname(dir)
+    if (parent === dir) break // filesystem root
+    dir = parent
+  }
+  return null
 }
-const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8'))
+
+/**
+ * Robustly locate package.json regardless of the execution environment:
+ * - Normal: node dist/bin/taco.js  (walks up from dist/bin/)
+ * - Source: bun run bin/taco.ts    (walks up from bin/)
+ * - Installed: ~/.taco/dist/bin/   (walks up to ~/.taco/)
+ * - Bun --compile bundle: import.meta.url is /$bunfs/root/... so we fall
+ *   back to process.argv[1] which is the real binary path on disk.
+ */
+function findPackageJson(): string {
+  const candidates: string[] = []
+
+  // Primary: the directory of the current module file
+  try {
+    const modFile = fileURLToPath(import.meta.url)
+    candidates.push(dirname(modFile))
+  } catch {
+    // import.meta.url may not be a file:// URL in some bundlers
+  }
+
+  // Fallback: the directory of the executable (works for Bun --compile)
+  if (process.argv[1]) {
+    candidates.push(dirname(process.argv[1]))
+  }
+
+  for (const start of candidates) {
+    const found = findPackageJsonFrom(start)
+    if (found) return found
+  }
+
+  throw new Error(
+    'Could not locate package.json. Please reinstall TACO: https://github.com/bulga138/taco'
+  )
+}
+
+const packageJson = JSON.parse(readFileSync(findPackageJson(), 'utf-8'))
 
 // ── Braille art embedded as a constant
 /* prettier-ignore */
@@ -101,6 +144,8 @@ export function createProgram(): Command {
   registerTodayCommand(program)
   registerConfigCommand(program)
   registerHealthCommand(program)
+  registerUpdateCommand(program)
+  registerCompletionCommand(program)
 
   // Default action (no sub-command) → run TUI if TTY available, otherwise overview
   program.action(async () => {

@@ -1,4 +1,4 @@
-import type { Command } from 'commander'
+import { Command, Option } from 'commander'
 import { getDbAsync } from '../../data/db.js'
 import { loadUsageEvents } from '../../data/queries.js'
 import { buildFilters } from '../../utils/dates.js'
@@ -16,9 +16,15 @@ export function registerTrendsCommand(program: Command): void {
   const cmd = program.command('trends').description('Compare usage across periods').alias('t')
 
   addFilterFlags(cmd)
-    .option('--period <period>', 'Period grouping: day, week, month (default: week)')
+    .addOption(
+      new Option('--period <period>', 'Period grouping (default: week)')
+        .choices(['day', 'week', 'month'])
+    )
     .option('--periods <n>', 'Number of periods to compare (default: 4)')
-    .option('--sort <field>', 'Sort by: cost, tokens, date, messages (default: date)')
+    .addOption(
+      new Option('--sort <field>', 'Sort by field (default: date)')
+        .choices(['cost', 'tokens', 'date', 'messages'])
+    )
 
   cmd.action(async opts => {
     const config = getConfig()
@@ -38,12 +44,14 @@ export function registerTrendsCommand(program: Command): void {
     const gw =
       format === 'visual' && config.gateway ? await fetchGatewayMetrics(config.gateway) : null
 
+    const hasGateway = !!config.gateway
+
     if (format === 'json') {
       process.stdout.write(formatTrendsJson(stats) + '\n')
     } else if (format === 'csv') {
       process.stdout.write(formatTrendsCsv(stats) + '\n')
     } else if (format === 'markdown') {
-      process.stdout.write(formatTrendsMarkdown(stats, period, rangeLabel) + '\n')
+      process.stdout.write(formatTrendsMarkdown(stats, period, rangeLabel, hasGateway) + '\n')
     } else {
       process.stdout.write(formatTrends(stats, period, rangeLabel, gw?.totalSpend))
     }

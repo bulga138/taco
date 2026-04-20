@@ -1,4 +1,4 @@
-import type { Command } from 'commander'
+import { Command, Option } from 'commander'
 import { getDbAsync } from '../../data/db.js'
 import { loadUsageEvents } from '../../data/queries.js'
 import { buildFilters } from '../../utils/dates.js'
@@ -18,7 +18,10 @@ export function registerProjectsCommand(program: Command): void {
     .alias('proj')
 
   addFilterFlags(cmd)
-    .option('--sort <field>', 'Sort by: cost, tokens, messages (default: cost)')
+    .addOption(
+      new Option('--sort <field>', 'Sort by field (default: cost)')
+        .choices(['cost', 'tokens', 'messages'])
+    )
 
   cmd.action(async opts => {
     const config = getConfig()
@@ -35,15 +38,16 @@ export function registerProjectsCommand(program: Command): void {
     let stats = computeProjectStats(events)
     stats = sortProjectStats(stats, sort)
     const rangeLabel = buildRangeLabel(opts)
+    const hasGateway = !!config.gateway
 
     if (format === 'json') {
       process.stdout.write(formatProjectsJson(stats) + '\n')
     } else if (format === 'csv') {
       process.stdout.write(formatProjectsCsv(stats) + '\n')
     } else if (format === 'markdown') {
-      process.stdout.write(formatProjectsMarkdown(stats, rangeLabel) + '\n')
+      process.stdout.write(formatProjectsMarkdown(stats, rangeLabel, hasGateway) + '\n')
     } else {
-      process.stdout.write(formatProjects(stats, rangeLabel))
+      process.stdout.write(formatProjects(stats, rangeLabel, hasGateway))
     }
   })
 }

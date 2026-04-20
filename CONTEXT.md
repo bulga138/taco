@@ -128,7 +128,9 @@ taco/
 │   │       ├── models.ts        # taco models (+ gateway cost column)
 │   │       ├── overview.ts      # taco overview (+ gateway metrics section)
 │   │       ├── today.ts         # taco today (+ gateway spend + per-model gateway cost)
-│   │       └── tui.ts           # TUI dashboard (+ gateway on all tabs)
+│   │       ├── tui.ts           # TUI dashboard (+ gateway on all tabs)
+│   │       ├── update.ts        # taco update (self-update via git ls-remote + install.sh)
+│   │       └── completion.ts    # taco completion (bash/zsh/fish script generator)
 │   ├── config/                  # Configuration management
 │   │   └── index.ts             # TacoConfig, GatewayConfig, GatewayAuth,
 │   │                            # GatewayFieldMapping — all config types here

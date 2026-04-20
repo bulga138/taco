@@ -1,4 +1,4 @@
-import type { Command } from 'commander'
+import { Command, Option } from 'commander'
 import { getDbAsync } from '../../data/db.js'
 import { loadUsageEvents } from '../../data/queries.js'
 import { buildFilters } from '../../utils/dates.js'
@@ -18,7 +18,10 @@ export function registerProvidersCommand(program: Command): void {
     .description('Show per-provider token usage breakdown')
     .alias('p')
 
-  addFilterFlags(cmd).option('--sort <field>', 'Sort by: cost, tokens, messages (default: tokens)')
+  addFilterFlags(cmd).addOption(
+    new Option('--sort <field>', 'Sort by field (default: tokens)')
+      .choices(['cost', 'tokens', 'messages'])
+  )
 
   cmd.action(async opts => {
     const config = getConfig()

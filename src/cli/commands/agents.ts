@@ -1,4 +1,4 @@
-import type { Command } from 'commander'
+import { Command, Option } from 'commander'
 import { getDbAsync } from '../../data/db.js'
 import { loadUsageEvents } from '../../data/queries.js'
 import { buildFilters } from '../../utils/dates.js'
@@ -18,7 +18,10 @@ export function registerAgentsCommand(program: Command): void {
     .alias('a')
 
   addFilterFlags(cmd)
-    .option('--sort <field>', 'Sort by: cost, tokens, messages (default: tokens)')
+    .addOption(
+      new Option('--sort <field>', 'Sort by field (default: tokens)')
+        .choices(['cost', 'tokens', 'messages'])
+    )
 
   cmd.action(async opts => {
     const config = getConfig()
@@ -35,15 +38,16 @@ export function registerAgentsCommand(program: Command): void {
     let stats = computeAgentStats(events)
     stats = sortAgentStats(stats, sort)
     const rangeLabel = buildRangeLabel(opts)
+    const hasGateway = !!config.gateway
 
     if (format === 'json') {
       process.stdout.write(formatAgentsJson(stats) + '\n')
     } else if (format === 'csv') {
       process.stdout.write(formatAgentsCsv(stats) + '\n')
     } else if (format === 'markdown') {
-      process.stdout.write(formatAgentsMarkdown(stats, rangeLabel) + '\n')
+      process.stdout.write(formatAgentsMarkdown(stats, rangeLabel, hasGateway) + '\n')
     } else {
-      process.stdout.write(formatAgents(stats, rangeLabel))
+      process.stdout.write(formatAgents(stats, rangeLabel, hasGateway))
     }
   })
 }

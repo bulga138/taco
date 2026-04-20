@@ -1,4 +1,4 @@
-import type { Command } from 'commander'
+import { Command, Argument } from 'commander'
 import { writeFileSync } from 'node:fs'
 import { getDbAsync } from '../../data/db.js'
 import { loadUsageEvents, loadSessions } from '../../data/queries.js'
@@ -27,9 +27,11 @@ type ExportTarget =
 
 export function registerExportCommand(program: Command): void {
   const cmd = program
-    .command('export [target]')
-    .description(
-      'Export raw data (target: overview, models, providers, daily, projects, sessions, agents)'
+    .command('export')
+    .description('Export raw data to stdout or a file')
+    .addArgument(
+      new Argument('[target]', 'Data to export')
+        .choices(['overview', 'models', 'providers', 'daily', 'projects', 'sessions', 'agents'])
     )
     .alias('e')
 

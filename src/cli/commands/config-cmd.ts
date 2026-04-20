@@ -1,5 +1,5 @@
 import { createInterface } from 'node:readline'
-import type { Command } from 'commander'
+import { Command, Argument } from 'commander'
 import { getConfig, getConfigPath, saveConfig } from '../../config/index.js'
 import type {
   TacoConfig,
@@ -21,9 +21,15 @@ import { validateGatewayConfig, formatValidationErrors } from '../../utils/confi
 
 export function registerConfigCommand(program: Command): void {
   const cmd = program
-    .command('config [subcommand] [key] [value]')
+    .command('config')
     .description('View or edit TACO configuration')
     .allowUnknownOption(true)
+    .addArgument(
+      new Argument('[subcommand]', 'Subcommand to run')
+        .choices(['path', 'init', 'set', 'gateway', 'show'])
+    )
+    .argument('[key]', 'Config key (for set subcommand)')
+    .argument('[value]', 'Config value (for set subcommand)')
     .addHelpText(
       'after',
       `

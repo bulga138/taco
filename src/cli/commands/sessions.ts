@@ -1,4 +1,4 @@
-import type { Command } from 'commander'
+import { Command, Option } from 'commander'
 import { getDbAsync } from '../../data/db.js'
 import { loadUsageEvents, loadSessions } from '../../data/queries.js'
 import { buildFilters } from '../../utils/dates.js'
@@ -19,7 +19,10 @@ export function registerSessionsCommand(program: Command): void {
 
   addFilterFlags(cmd)
     .option('--limit <n>', 'Number of sessions to show', '20')
-    .option('--sort <field>', 'Sort by: cost, tokens, date, messages (default: date)')
+    .addOption(
+      new Option('--sort <field>', 'Sort by field (default: date)')
+        .choices(['cost', 'tokens', 'date', 'messages'])
+    )
 
   cmd.action(async opts => {
     const config = getConfig()
@@ -45,15 +48,16 @@ export function registerSessionsCommand(program: Command): void {
     stats = stats.slice(0, limit)
 
     const rangeLabel = buildRangeLabel(opts)
+    const hasGateway = !!config.gateway
 
     if (format === 'json') {
       process.stdout.write(formatSessionsJson(stats) + '\n')
     } else if (format === 'csv') {
       process.stdout.write(formatSessionsCsv(stats) + '\n')
     } else if (format === 'markdown') {
-      process.stdout.write(formatSessionsMarkdown(stats, rangeLabel) + '\n')
+      process.stdout.write(formatSessionsMarkdown(stats, rangeLabel, hasGateway) + '\n')
     } else {
-      process.stdout.write(formatSessions(stats, rangeLabel))
+      process.stdout.write(formatSessions(stats, rangeLabel, hasGateway))
     }
   })
 }

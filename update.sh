@@ -15,8 +15,7 @@
 set -euo pipefail
 
 REPO="bulga138/taco"
-GITHUB_API="https://api.github.com/repos/${REPO}/releases/latest"
-GITHUB_DOWNLOAD="https://github.com/${REPO}/releases/latest/download"
+GITHUB_DOWNLOAD="https://github.com/${REPO}/releases/download"
 
 # --- Colors ---
 if [[ -t 1 ]]; then
@@ -38,21 +37,30 @@ error()   { echo -e "${RED}  [ERROR]${RESET} $*" >&2; exit 1; }
 # --- Parse args ---
 CHECK_ONLY=false
 FORCE=false
+TARGET_VERSION=""
 
 for arg in "$@"; do
   case "$arg" in
     --check|-c) CHECK_ONLY=true ;;
     --force|-f) FORCE=true ;;
+    --version=*) TARGET_VERSION="${arg#--version=}" ;;
     --help|-h)
       echo "Usage: $0 [OPTIONS]"
       echo ""
       echo "Options:"
-      echo "  --check, -c    Check for updates only (don't install)"
-      echo "  --force, -f    Force update even if same version"
-      echo "  --help, -h     Show this help"
+      echo "  --check, -c          Check for updates only (don't install)"
+      echo "  --force, -f          Force update even if same version"
+      echo "  --version <tag>      Update to a specific version (e.g. v0.1.3)"
+      echo "  --help, -h           Show this help"
       exit 0
       ;;
   esac
+done
+# Handle --version <value> (two-argument form)
+_prev=""
+for arg in "$@"; do
+  [[ "$_prev" == "--version" ]] && { TARGET_VERSION="$arg"; break; }
+  _prev="$arg"
 done
 
 echo ""
@@ -81,28 +89,31 @@ else
 fi
 
 # --- Check for updates ---
-info "Checking for latest release..."
-
-# Check if curl is available
+# Check if curl/git is available
 if ! command -v curl &> /dev/null; then
   error "curl is required but not installed"
 fi
 
-# Fetch latest release info
-LATEST_INFO=$(curl -s "$GITHUB_API" 2>/dev/null || echo "")
+if [[ -n "$TARGET_VERSION" ]]; then
+  # Normalise: ensure it starts with 'v'
+  [[ "$TARGET_VERSION" == v* ]] || TARGET_VERSION="v${TARGET_VERSION}"
+  LATEST_VERSION="${TARGET_VERSION#v}"
+  info "Target version: $LATEST_VERSION (pinned)"
+else
+  info "Checking for latest release..."
+  # Use git ls-remote — no API rate limits
+  LATEST_TAG=$(git ls-remote --tags "https://github.com/${REPO}.git" 2>/dev/null \
+    | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+$' \
+    | sort -V \
+    | tail -1 || true)
 
-if [[ -z "$LATEST_INFO" ]]; then
-  error "Failed to fetch release information from GitHub"
+  if [[ -z "$LATEST_TAG" ]]; then
+    error "Could not determine latest release. Check your internet connection or pin a version with --version v0.1.4"
+  fi
+
+  LATEST_VERSION="${LATEST_TAG#v}"
+  info "Latest version: $LATEST_VERSION"
 fi
-
-LATEST_VERSION=$(echo "$LATEST_INFO" | grep -o '"tag_name": "[^"]*"' | cut -d'"' -f4)
-LATEST_VERSION=${LATEST_VERSION#v}  # Remove 'v' prefix if present
-
-if [[ -z "$LATEST_VERSION" ]]; then
-  error "Could not parse latest version from GitHub API"
-fi
-
-info "Latest version: $LATEST_VERSION"
 
 # --- Compare versions ---
 version_compare() {
@@ -159,55 +170,49 @@ case "$OSTYPE" in
   msys*|win32*|cygwin*) OS="windows" ;;
 esac
 
-# Download latest release
-DOWNLOAD_URL="${GITHUB_DOWNLOAD}/taco-${OS}.zip"
+# Download release archive (tar.gz format, same as install.sh)
+TAG="v${LATEST_VERSION}"
+DOWNLOAD_URL="${GITHUB_DOWNLOAD}/${TAG}/taco-release-${TAG}.tar.gz"
 info "Downloading from: $DOWNLOAD_URL"
 
-if ! curl -L -o "$TEMP_DIR/taco.zip" "$DOWNLOAD_URL" 2>/dev/null; then
-  # Try generic zip as fallback
-  DOWNLOAD_URL="${GITHUB_DOWNLOAD}/taco.zip"
-  info "Trying: $DOWNLOAD_URL"
-  curl -L -o "$TEMP_DIR/taco.zip" "$DOWNLOAD_URL" || error "Download failed"
+if ! curl -fsSL -H "User-Agent: Mozilla/5.0" -o "$TEMP_DIR/taco.tar.gz" "$DOWNLOAD_URL" 2>/dev/null; then
+  error "Download failed. Check your internet connection or try a different version with --version <tag>"
 fi
 
 success "Downloaded successfully"
 
 # Extract
 info "Extracting..."
-cd "$TEMP_DIR"
-unzip -q taco.zip || error "Failed to extract archive"
+tar xz -C "$TEMP_DIR" -f "$TEMP_DIR/taco.tar.gz" || error "Failed to extract archive"
 
 # Find install directory
 INSTALL_DIR=$(dirname "$TACO_PATH")
-if [[ "$OS" == "windows" ]] && [[ "$TACO_PATH" == *.bat ]]; then
-  INSTALL_DIR=$(dirname "$TACO_PATH")
-fi
 
-# Backup current installation
-if [[ -d "$INSTALL_DIR/dist" ]]; then
-  BACKUP_DIR="${INSTALL_DIR}/dist.backup.$(date +%Y%m%d%H%M%S)"
-  info "Creating backup: $BACKUP_DIR"
-  cp -r "$INSTALL_DIR/dist" "$BACKUP_DIR"
-fi
+# The archive contains an install.sh — re-run it to do the update properly.
+# This reuses all the same logic as a fresh install (build, copy, wrapper creation).
+EXTRACTED_INSTALLER="$TEMP_DIR/install.sh"
+if [[ -f "$EXTRACTED_INSTALLER" ]]; then
+  info "Running installer from archive..."
+  export LATEST_TAG="v${LATEST_VERSION}"
+  export REPO
+  bash "$EXTRACTED_INSTALLER" "$@"
+else
+  # Fallback: manually copy dist/ if installer is not in archive
+  info "Installing to: $INSTALL_DIR"
 
-# Install new version
-info "Installing to: $INSTALL_DIR"
+  if [[ -d "$INSTALL_DIR/dist" ]]; then
+    BACKUP_DIR="${INSTALL_DIR}/dist.backup.$(date +%Y%m%d%H%M%S)"
+    info "Creating backup: $BACKUP_DIR"
+    cp -r "$INSTALL_DIR/dist" "$BACKUP_DIR"
+  fi
 
-# Copy new files
-if [[ -d "$TEMP_DIR/dist" ]]; then
-  rm -rf "$INSTALL_DIR/dist"
-  cp -r "$TEMP_DIR/dist" "$INSTALL_DIR/"
-  chmod +x "$INSTALL_DIR/dist/bin/taco.js" 2>/dev/null || true
-elif [[ -d "$TEMP_DIR/taco/dist" ]]; then
-  rm -rf "$INSTALL_DIR/dist"
-  cp -r "$TEMP_DIR/taco/dist" "$INSTALL_DIR/"
-  chmod +x "$INSTALL_DIR/dist/bin/taco.js" 2>/dev/null || true
-fi
-
-# Copy wrapper script if present
-if [[ -f "$TEMP_DIR/taco" ]] && [[ "$OS" != "windows" ]]; then
-  cp "$TEMP_DIR/taco" "$INSTALL_DIR/taco"
-  chmod +x "$INSTALL_DIR/taco"
+  if [[ -d "$TEMP_DIR/dist" ]]; then
+    rm -rf "$INSTALL_DIR/dist"
+    cp -r "$TEMP_DIR/dist" "$INSTALL_DIR/"
+    chmod +x "$INSTALL_DIR/dist/bin/taco.js" 2>/dev/null || true
+  else
+    error "Could not find dist/ in the downloaded archive"
+  fi
 fi
 
 success "Installation complete"

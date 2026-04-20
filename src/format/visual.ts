@@ -350,7 +350,7 @@ export function formatDaily(
     { header: 'Sessions', align: 'right', width: 10, render: r => String(r.sessionCount) },
     { header: 'Messages', align: 'right', width: 10, render: r => String(r.messageCount) },
     { header: 'Tokens', align: 'right', width: 12, render: r => formatTokens(r.tokens.total) },
-    { header: 'Local $', align: 'right', width: 10, render: r => formatCost(r.cost) },
+    { header: gatewayDays ? 'Local $' : 'Cost', align: 'right', width: 10, render: r => formatCost(r.cost) },
   ]
 
   // Add gateway cost column when data is available
@@ -374,7 +374,7 @@ export function formatDaily(
 
 // ─── Projects ─────────────────────────────────────────────────────────────────
 
-export function formatProjects(projects: ProjectStats[], rangeLabel: string): string {
+export function formatProjects(projects: ProjectStats[], rangeLabel: string, hasGateway = false): string {
   const lines: string[] = []
   lines.push(header(`Projects${rangeLabel ? ' · ' + rangeLabel : ''}`))
 
@@ -397,7 +397,7 @@ export function formatProjects(projects: ProjectStats[], rangeLabel: string): st
         { header: 'Sessions', align: 'right', width: 10, render: r => String(r.sessionCount) },
         { header: 'Messages', align: 'right', width: 10, render: r => String(r.messageCount) },
         { header: 'Tokens', align: 'right', width: 12, render: r => formatTokens(r.tokens.total) },
-        { header: 'Cost', align: 'right', width: 10, render: r => formatCost(r.cost) },
+        { header: hasGateway ? 'Local $' : 'Cost', align: 'right', width: 10, render: r => formatCost(r.cost) },
       ],
       projects,
       { useColor }
@@ -410,7 +410,7 @@ export function formatProjects(projects: ProjectStats[], rangeLabel: string): st
 
 // ─── Sessions ─────────────────────────────────────────────────────────────────
 
-export function formatSessions(sessions: SessionStats[], rangeLabel: string): string {
+export function formatSessions(sessions: SessionStats[], rangeLabel: string, hasGateway = false): string {
   const lines: string[] = []
   lines.push(header(`Sessions${rangeLabel ? ' · ' + rangeLabel : ''}`))
 
@@ -438,7 +438,7 @@ export function formatSessions(sessions: SessionStats[], rangeLabel: string): st
         },
         { header: 'Msgs', align: 'right', width: 6, render: r => String(r.messageCount) },
         { header: 'Tokens', align: 'right', width: 12, render: r => formatTokens(r.tokens.total) },
-        { header: 'Cost', align: 'right', width: 10, render: r => formatCost(r.cost) },
+        { header: hasGateway ? 'Local $' : 'Cost', align: 'right', width: 10, render: r => formatCost(r.cost) },
         {
           header: 'Duration',
           align: 'right',
@@ -458,7 +458,7 @@ export function formatSessions(sessions: SessionStats[], rangeLabel: string): st
 
 // ─── Agents ───────────────────────────────────────────────────────────────────
 
-export function formatAgents(agents: AgentStats[], rangeLabel: string): string {
+export function formatAgents(agents: AgentStats[], rangeLabel: string, hasGateway = false): string {
   const lines: string[] = []
   lines.push(header(`Agents${rangeLabel ? ' · ' + rangeLabel : ''}`))
 
@@ -480,7 +480,7 @@ export function formatAgents(agents: AgentStats[], rangeLabel: string): string {
         },
         { header: 'Messages', align: 'right', width: 10, render: r => String(r.messageCount) },
         { header: 'Tokens', align: 'right', width: 12, render: r => formatTokens(r.tokens.total) },
-        { header: 'Cost', align: 'right', width: 10, render: r => formatCost(r.cost) },
+        { header: hasGateway ? 'Local $' : 'Cost', align: 'right', width: 10, render: r => formatCost(r.cost) },
         {
           header: '',
           align: 'left',
@@ -535,9 +535,9 @@ export function formatTrends(
         { header: 'Sessions', align: 'right', width: 10, render: r => String(r.sessionCount) },
         { header: 'Messages', align: 'right', width: 10, render: r => String(r.messageCount) },
         { header: 'Tokens', align: 'right', width: 12, render: r => formatTokens(r.tokens.total) },
-        { header: 'Cost', align: 'right', width: 10, render: r => formatCost(r.cost) },
+        { header: gatewayTotalSpend != null ? 'Local $' : 'Cost', align: 'right', width: 10, render: r => formatCost(r.cost) },
         {
-          header: 'Δ Cost',
+          header: gatewayTotalSpend != null ? 'Δ Local $' : 'Δ Cost',
           align: 'right',
           width: 12,
           priority: 1,

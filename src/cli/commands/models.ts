@@ -1,4 +1,4 @@
-import type { Command } from 'commander'
+import { Command, Option } from 'commander'
 import { getDbAsync } from '../../data/db.js'
 import { loadUsageEvents } from '../../data/queries.js'
 import { buildFilters } from '../../utils/dates.js'
@@ -22,7 +22,10 @@ export function registerModelsCommand(program: Command): void {
     .description('Show per-model token usage and cost breakdown')
     .alias('m')
 
-  addFilterFlags(cmd).option('--sort <field>', 'Sort by: cost, tokens, messages (default: tokens)')
+  addFilterFlags(cmd).addOption(
+    new Option('--sort <field>', 'Sort by field (default: tokens)')
+      .choices(['cost', 'tokens', 'messages'])
+  )
 
   cmd.action(async opts => {
     const config = getConfig()
@@ -150,19 +153,24 @@ function formatModelsWithGateway(
     totalLocal += m.cost
     totalGateway += gwCost ?? 0
 
-    const gwStr = gwCost !== undefined ? formatCost(gwCost) : dim('—')
+    // Pad plain string before applying dim() so ANSI bytes don't skew padStart()
+    const gwStr = gwCost !== undefined ? formatCost(gwCost) : '—'
     const pct = `${(m.percentage * 100).toFixed(1)}%`
 
     const modelDisplay = (
       m.modelId.length > MODEL_W - 1 ? m.modelId.slice(0, MODEL_W - 2) + '…' : m.modelId
     ).padEnd(MODEL_W)
 
+    // Apply dim to '—' after padding so the padding width is computed on the plain string
+    const gwCell = gwCost !== undefined
+      ? gwStr.padStart(GW_W)
+      : (useColor ? dim(gwStr.padStart(GW_W)) : gwStr.padStart(GW_W))
     lines.push(
       '  ' +
         (useColor ? COLORS.value(modelDisplay) : modelDisplay) +
         formatTokens(m.tokens.total).padStart(TOKENS_W) +
         formatCost(m.cost).padStart(LOCAL_W) +
-        gwStr.padStart(GW_W) +
+        gwCell +
         pct.padStart(SHARE_W)
     )
   }
@@ -170,12 +178,16 @@ function formatModelsWithGateway(
   // Totals row
   lines.push('  ' + dim('─'.repeat(MODEL_W + TOKENS_W + LOCAL_W + GW_W + SHARE_W)))
   const totalTokens = stats.reduce((s, m) => s + m.tokens.total, 0)
+  // Pad the plain strings BEFORE applying color/bold so ANSI escape bytes
+  // don't inflate the length that padStart/padEnd measures.
   lines.push(
     '  ' +
       bold('Total'.padEnd(MODEL_W)) +
       formatTokens(totalTokens).padStart(TOKENS_W) +
-      bold(formatCost(totalLocal)).padStart(LOCAL_W) +
-      (useColor ? chalk.green(formatCost(totalGateway)) : formatCost(totalGateway)).padStart(GW_W) +
+      bold(formatCost(totalLocal).padStart(LOCAL_W)) +
+      (useColor
+        ? chalk.green(formatCost(totalGateway).padStart(GW_W))
+        : formatCost(totalGateway).padStart(GW_W)) +
       ''.padStart(SHARE_W)
   )
 

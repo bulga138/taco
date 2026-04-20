@@ -15,18 +15,41 @@ param(
 
 # --- Remote bootstrap: detect piped execution (irm | iex) ---
 # When piped, $MyInvocation.MyCommand.Path is empty — no local repo files exist.
-# Download the latest release archive and re-invoke from the extracted dir.
+# Download the requested (or latest) release archive and re-invoke from the extracted dir.
+#
+# Install specific version (set env var before piping):
+#   $env:TACO_VERSION="v0.1.3"; irm https://raw.githubusercontent.com/bulga138/taco/master/install.ps1 | iex
+# Install latest:
+#   irm https://raw.githubusercontent.com/bulga138/taco/master/install.ps1 | iex
 if (-not $MyInvocation.MyCommand.Path) {
     $Repo = "bulga138/taco"
-    $ApiUrl = "https://api.github.com/repos/$Repo/releases/latest"
 
-    try {
+    # Allow caller to pin a version via environment variable
+    $LatestTag = $env:TACO_VERSION
+    if ($LatestTag) {
+        # Normalise: ensure it starts with 'v'
+        if (-not $LatestTag.StartsWith('v')) { $LatestTag = "v$LatestTag" }
+        Write-Host "Installing TACO $LatestTag (pinned)..."
+    } else {
+        # Discover latest tag via git ls-remote — no API rate limits
         Write-Host "Fetching latest TACO release..."
-        $Release = Invoke-RestMethod -Uri $ApiUrl -ErrorAction Stop
-        $LatestTag = $Release.tag_name
-    } catch {
-        Write-Host "Error: Could not determine latest release from GitHub" -ForegroundColor Red
-        return
+        try {
+            $GitOutput = & git ls-remote --tags "https://github.com/$Repo.git" 2>$null
+            $LatestTag = $GitOutput `
+                | Select-String -Pattern 'v(\d+\.\d+\.\d+)$' `
+                | ForEach-Object { $_.Matches[0].Value } `
+                | Sort-Object { [version]($_ -replace '^v','') } `
+                | Select-Object -Last 1
+        } catch {
+            $LatestTag = $null
+        }
+        if (-not $LatestTag) {
+            Write-Host "Error: Could not determine latest release. Check your internet connection." -ForegroundColor Red
+            Write-Host "To install a specific version, run:" -ForegroundColor Yellow
+            Write-Host '  $env:TACO_VERSION="v0.1.4"; irm https://raw.githubusercontent.com/bulga138/taco/master/install.ps1 | iex'
+            return
+        }
+        Write-Host "Latest release: $LatestTag"
     }
 
     $ArchiveUrl = "https://github.com/$Repo/releases/download/$LatestTag/taco-release-$LatestTag.tar.gz"
@@ -393,6 +416,8 @@ exec $RunCmd "$InstallDir/dist/bin/taco.js" "`$@"
         Remove-Item -Path "$InstallDir\dist" -Recurse -Force
     }
     Copy-Item -Path "$ScriptDir\dist" -Destination $InstallDir -Recurse -Force
+    # Remove dist/package.json so version is read from the correct $InstallDir/package.json
+    Remove-Item -Path "$InstallDir\dist\package.json" -Force -ErrorAction SilentlyContinue
 
     # Copy package.json, uninstall scripts, and install dependencies
     Copy-Item -Path "$ScriptDir\package.json" -Destination $InstallDir -Force
