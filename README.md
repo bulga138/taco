@@ -317,4 +317,4 @@ Remove-Item -Recurse -Force "$env:USERPROFILE\.taco"
 
 ## License
 
-MIT.
+MIT License - see [LICENSE](./LICENSE) file
