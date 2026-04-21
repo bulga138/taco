@@ -22,42 +22,27 @@ jobs:
             os_name: linux
             arch: x64
             ext: ''
+            bun_target: ''
           - os: windows-latest
             target: windows-x64
             os_name: windows
             arch: x64
             ext: '.exe'
+            bun_target: ''
           - os: macos-latest
             target: macos-x64
             os_name: macos
             arch: x64
             ext: ''
+            bun_target: '--target bun-darwin-x64'
           - os: macos-latest
             target: macos-arm64
             os_name: macos
             arch: arm64
             ext: ''
+            bun_target: ''
     steps:
       - uses: actions/checkout@v6
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v5.0.0
-        with:
-          version: 9
-          run_install: false
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6.3.0
-        with:
-          node-version: '22.x'
-          cache: 'pnpm'
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build
-        run: pnpm run build
-
       - name: Install Bun
         uses: oven-sh/setup-bun@v2
         with:
@@ -65,7 +50,7 @@ jobs:
 
       - name: Create standalone executable
         run: |
-          bun run bundle
+          bun build ./bin/taco.ts --outfile ./taco ${{ matrix.bun_target }} --compile
           if [ ! -f taco ] && [ ! -f taco.exe ]; then
             echo "ERROR: Binary 'taco' or 'taco.exe' not created after bun run bundle"
             exit 1
@@ -81,7 +66,7 @@ jobs:
             file taco 2>/dev/null || file taco.exe 2>/dev/null || echo "File command not available"
             ls -lh taco* 2>/dev/null || echo "ls command failed"
           else
-            echo "ERROR: Binary not found"
+            echo "ERROR: Binary 'taco' or 'taco.exe' not created"
             exit 1
           fi
         shell: bash
@@ -129,22 +114,13 @@ jobs:
           fi
         shell: bash
 
-      - name: Upload executable to release
+      - name: Upload release assets
         uses: softprops/action-gh-release@v3.0.0
         with:
-          files: taco-v*-*
+          files: taco-*
           generate_release_notes: ${{ matrix.target == 'linux-x64' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload checksum to release
-        uses: softprops/action-gh-release@v3.0.0
-        with:
-          files: taco-*.sha256
-          generate_release_notes: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
   create-source-archive:
     name: Create Source Archive
     runs-on: ubuntu-latest
@@ -171,6 +147,14 @@ jobs:
       - name: Build
         run: pnpm run build
 
+      - name: Verify dist output
+        run: |
+          if [ ! -d dist ] || [ -z "$(ls -A dist)" ]; then
+            echo "ERROR: dist/ is missing or empty after build"
+            exit 1
+          fi
+          echo "dist/ contains $(find dist -type f | wc -l) files"
+
       - name: Create source archive
         run: |
           VERSION=${GITHUB_REF_NAME#v}
@@ -184,7 +168,19 @@ jobs:
             update.sh \
             README.md \
             package.json \
-            LICENSE 2>/dev/null || true
+            LICENSE
+
+      - name: Verify archive
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          ARCHIVE="taco-release-${VERSION}.tar.gz"
+          FILE_COUNT=$(tar -tzf "$ARCHIVE" | wc -l)
+          echo "Archive contains $FILE_COUNT files"
+          if [ "$FILE_COUNT" -lt 10 ]; then
+            echo "ERROR: Archive looks incomplete (only $FILE_COUNT files)"
+            exit 1
+          fi
+          ls -lh "$ARCHIVE"
 
       - name: Upload source archive to release
         uses: softprops/action-gh-release@v3.0.0
