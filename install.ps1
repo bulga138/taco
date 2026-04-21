@@ -187,7 +187,9 @@ function Download-Binary {
     param($Version, $InstallDir)
     
     $Repo = "bulga138/taco"
-    $BinaryName = "taco-${Version}-${OS}-${Arch}.exe"
+    
+    $VersionNoV = $Version -replace '^v', ''
+    $BinaryName = "taco-${VersionNoV}-${OS}-${Arch}.exe"
     $BinaryUrl = "https://github.com/$Repo/releases/download/$Version/$BinaryName"
     $ChecksumUrl = "https://github.com/$Repo/releases/download/$Version/${BinaryName}.sha256"
     
@@ -281,8 +283,8 @@ $NodeVersion = & node --version
 $NodeVersion = $NodeVersion -replace '^v', ''
 $NodeMajor = [int]($NodeVersion -split '\.')[0]
 
-if ($NodeMajor -lt 18) {
-    Error "Node.js 18+ is required. Found: $NodeVersion"
+if ($NodeMajor -lt 22) {
+    Error "Node.js 22+ is required. Found: $NodeVersion"
 }
 
 Success "Node.js $NodeVersion detected"

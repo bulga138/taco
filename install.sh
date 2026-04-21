@@ -204,8 +204,9 @@ download_binary() {
   local version="$1"
   local install_dir="$2"
   
+  local version_no_v="${version#v}"
   # Construct binary name: taco-{VERSION}-{OS}-{ARCH}
-  local binary_name="taco-${version}-${OS}-${ARCH}"
+  local binary_name="taco-${version_no_v}-${OS}-${ARCH}"
   [[ "$OS" == "windows" ]] && binary_name="${binary_name}.exe"
   
   local binary_url="https://github.com/${REPO}/releases/download/${version}/${binary_name}"
