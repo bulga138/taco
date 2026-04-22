@@ -396,6 +396,11 @@ if [[ "$BINARY_INSTALLED" == "true" ]]; then
     cp "$REPO_DIR/uninstall.sh" "$INSTALL_DIR/"
     chmod +x "$INSTALL_DIR/uninstall.sh"
   fi
+  
+  if [[ -f "$REPO_DIR/update.sh" ]]; then
+    cp "$REPO_DIR/update.sh" "$INSTALL_DIR/"
+    chmod +x "$INSTALL_DIR/update.sh"
+  fi
   if [[ -f "$REPO_DIR/uninstall.ps1" ]]; then
     cp "$REPO_DIR/uninstall.ps1" "$INSTALL_DIR/"
   fi
