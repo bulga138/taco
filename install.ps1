@@ -71,9 +71,11 @@ if (-not $MyInvocation.MyCommand.Path) {
     $InstallDir = if ($System) { "C:\Program Files\taco" } else { "$env:USERPROFILE\.taco" }
     New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 
-    # Construct binary name — Windows always gets .exe
+    # Construct binary name
     $BinaryName = "taco-$Version-$OS-$Arch.exe"
+    $BinaryNameNoExt = "taco-$Version-$OS-$Arch"
     $BinaryUrl = "https://github.com/$Repo/releases/download/$LatestTag/$BinaryName"
+    $BinaryUrlNoExt = "https://github.com/$Repo/releases/download/$LatestTag/$BinaryNameNoExt"
     $ChecksumUrl = "$BinaryUrl.sha256"
     $Target = Join-Path $InstallDir "taco.exe"
 
@@ -81,27 +83,34 @@ if (-not $MyInvocation.MyCommand.Path) {
 
     try {
         Invoke-WebRequest -Uri $BinaryUrl -OutFile "$Target.tmp" -ErrorAction Stop -TimeoutSec 300
+    } catch {
+        Invoke-WebRequest -Uri $BinaryUrlNoExt -OutFile "$Target.tmp" -ErrorAction Stop -TimeoutSec 300
+    }
 
-         # Optional checksum verification
+    try {
+        $ChecksumFile = "$Target.sha256"
         try {
-            $ChecksumFile = "$Target.sha256"
             Invoke-WebRequest -Uri $ChecksumUrl -OutFile $ChecksumFile -ErrorAction Stop -TimeoutSec 30
-            $ExpectedChecksum = (Get-Content $ChecksumFile -Raw).Trim().Split()[0]
-            $ActualChecksum = (Get-FileHash "$Target.tmp" -Algorithm SHA256).Hash.ToLower()
-            if ($ExpectedChecksum -eq $ActualChecksum) {
-                Write-Host "  [OK] Checksum verified"
-             } else {
-                Write-Host "  [WARN] Checksum mismatch — binary may be corrupted, aborting" -ForegroundColor Yellow
-                Remove-Item "$Target.tmp" -Force -ErrorAction SilentlyContinue
-                Remove-Item $ChecksumFile -Force -ErrorAction SilentlyContinue
-                return
-            }
-
-        Remove-Item $ChecksumFile -Force -ErrorAction SilentlyContinue
         } catch {
-            # Checksum not available — continue
+            $ChecksumUrl = "$BinaryUrlNoExt.sha256"
+            Invoke-WebRequest -Uri $ChecksumUrl -OutFile $ChecksumFile -ErrorAction Stop -TimeoutSec 30
         }
-    
+        $ExpectedChecksum = (Get-Content $ChecksumFile -Raw).Trim().Split()[0]
+        $ActualChecksum = (Get-FileHash "$Target.tmp" -Algorithm SHA256).Hash.ToLower()
+        if ($ExpectedChecksum -eq $ActualChecksum) {
+            Write-Host "  [OK] Checksum verified"
+         } else {
+            Write-Host "  [WARN] Checksum mismatch — binary may be corrupted, aborting" -ForegroundColor Yellow
+            Remove-Item "$Target.tmp" -Force -ErrorAction SilentlyContinue
+            Remove-Item $ChecksumFile -Force -ErrorAction SilentlyContinue
+            return
+        }
+
+    Remove-Item $ChecksumFile -Force -ErrorAction SilentlyContinue
+    } catch {
+        # Checksum not available — continue
+    }
+
     Move-Item "$Target.tmp" $Target -Force
 
         # Add to PATH
@@ -224,7 +233,9 @@ function Download-Binary {
     
     $VersionNoV = $Version -replace '^v', ''
     $BinaryName = "taco-$VersionNoV-$OS-$Arch.exe"
+    $BinaryNameNoExt = "taco-$VersionNoV-$OS-$Arch"
     $BinaryUrl = "https://github.com/$Repo/releases/download/$Version/$BinaryName"
+    $BinaryUrlNoExt = "https://github.com/$Repo/releases/download/$Version/$BinaryNameNoExt"
     $ChecksumUrl = "$BinaryUrl.sha256"
 
     Info "Checking for pre-built binary: $BinaryName..."
@@ -237,33 +248,41 @@ function Download-Binary {
             
             try {
                 Invoke-WebRequest -Uri $BinaryUrl -OutFile $TmpFile -ErrorAction Stop -TimeoutSec 300
-                
-                $ChecksumFile = Join-Path $InstallDir "$BinaryName.sha256"
+            } catch {
+                Invoke-WebRequest -Uri $BinaryUrlNoExt -OutFile $TmpFile -ErrorAction Stop -TimeoutSec 300
+            }            
+            $ChecksumFile = Join-Path $InstallDir "$BinaryName.sha256"
+            try {
                 try {
                     Invoke-WebRequest -Uri $ChecksumUrl -OutFile $ChecksumFile -ErrorAction Stop -TimeoutSec 30
-                    Info "Verifying checksum..."
-                    
-                    $ExpectedChecksum = (Get-Content $ChecksumFile -Raw).Trim().Split()[0]
-                    $ActualChecksum = (Get-FileHash $TmpFile -Algorithm SHA256).Hash.ToLower()
-                    
-                    if ($ExpectedChecksum -eq $ActualChecksum) {
-                        Success "Checksum verified"
-                    } else {
-                        Warn "Checksum mismatch! Expected: $ExpectedChecksum, Got: $ActualChecksum"
-                        Warn "Binary may be corrupted, falling back to source build"
-                        Remove-Item $TmpFile -Force -ErrorAction SilentlyContinue
-                        Remove-Item $ChecksumFile -Force -ErrorAction SilentlyContinue
-                        return $false
-                    }
-                    Remove-Item $ChecksumFile -Force -ErrorAction SilentlyContinue
                 } catch {
-                    Info "No checksum file available, skipping verification"
+                    # Try without .exe extension
+                    $ChecksumUrl = "$BinaryUrlNoExt.sha256"
+                    Invoke-WebRequest -Uri $ChecksumUrl -OutFile $ChecksumFile -ErrorAction Stop -TimeoutSec 30
                 }
+                Info "Verifying checksum..."
                 
-                $FinalPath = Join-Path $InstallDir "taco.exe"
-                Move-Item -Path $TmpFile -Destination $FinalPath -Force
-                Success "Binary installed: $FinalPath"
-                return $true
+                $ExpectedChecksum = (Get-Content $ChecksumFile -Raw).Trim().Split()[0]
+                $ActualChecksum = (Get-FileHash $TmpFile -Algorithm SHA256).Hash.ToLower()
+                
+                if ($ExpectedChecksum -eq $ActualChecksum) {
+                    Success "Checksum verified"
+                } else {
+                    Warn "Checksum mismatch! Expected: $ExpectedChecksum, Got: $ActualChecksum"
+                    Warn "Binary may be corrupted, falling back to source build"
+                    Remove-Item $TmpFile -Force -ErrorAction SilentlyContinue
+                    Remove-Item $ChecksumFile -Force -ErrorAction SilentlyContinue
+                    return $false
+                }
+                Remove-Item $ChecksumFile -Force -ErrorAction SilentlyContinue
+            } catch {
+                Info "No checksum file available, skipping verification"
+            }
+            
+            $FinalPath = Join-Path $InstallDir "taco.exe"
+            Move-Item -Path $TmpFile -Destination $FinalPath -Force
+            Success "Binary installed: $FinalPath"
+            return $true
             } catch {
                 Warn "Download failed: $_. Will build from source instead"
                 if (Test-Path $TmpFile) { Remove-Item $TmpFile -Force }
