@@ -80,6 +80,7 @@ if (-not $MyInvocation.MyCommand.Path) {
     $Target = Join-Path $InstallDir "taco.exe"
 
     Write-Host "Downloading TACO $LatestTag for $OS-$Arch..."
+    try {
 
     try {
         Invoke-WebRequest -Uri $BinaryUrl -OutFile "$Target.tmp" -ErrorAction Stop -TimeoutSec 300
