@@ -11,7 +11,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      pull-requests: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -59,24 +58,13 @@ jobs:
           git add -A
           git commit -m "chore: bump version to v${{ steps.version.outputs.NEW_VERSION }}"
 
-      - name: Create Pull Request for version bump
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Push version bump
         run: |
-          BRANCH="version-bump/v${{ steps.version.outputs.NEW_VERSION }}"
-          git checkout -b "$BRANCH"
-          git push origin "$BRANCH"
-          gh pr create \
-            --base master \
-            --head "$BRANCH" \
-            --title "chore: bump version to v${{ steps.version.outputs.NEW_VERSION }}" \
-            --body "Automated version bump after PR merge."
-          gh pr merge "$BRANCH" --auto --squash
+          git pull --rebase origin master
+          git push origin master
 
       - name: Create tag
         run: |
-          git checkout master
-          git pull origin master
           git tag -a "v${{ steps.version.outputs.NEW_VERSION }}" -m "Release v${{ steps.version.outputs.NEW_VERSION }}"
           git push origin "v${{ steps.version.outputs.NEW_VERSION }}"
 
