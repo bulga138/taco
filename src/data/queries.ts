@@ -2,10 +2,11 @@ import type { Database } from './db.js'
 import type { UsageEvent, SessionRecord, TokenUsage, QueryFilters } from './types.js'
 import { DEFAULT_QUERY_LIMIT } from './types.js'
 
-// Raw row types from SQLite message table
+// Raw row types from SQLite session_message table (opencode v2)
 interface RawMessageRow {
   id: string
   session_id: string
+  type: string
   time_created: number
   data: string
   session_title: string | null
@@ -15,7 +16,7 @@ interface RawMessageRow {
   session_time_updated: number
 }
 
-// Raw row types from SQLite session table
+// Raw row types from SQLite session_v2 table (opencode v2)
 interface RawSessionRow {
   id: string
   title: string | null
@@ -26,22 +27,32 @@ interface RawSessionRow {
   time_updated: number
 }
 
-// JSON data shapes inside message.data
+// JSON data shapes inside session_message.data (opencode v2 — no role field,
+// model is nested; role lives in the type column instead)
 interface AssistantMessageData {
-  role: 'assistant'
   time?: { created?: number; completed?: number }
-  modelID?: string
-  providerID?: string
+  model?: { id?: string; providerID?: string }
   agent?: string
   cost?: number
   tokens?: {
-    total?: number
     input?: number
     output?: number
     reasoning?: number
     cache?: { read?: number; write?: number }
   }
   finish?: string
+}
+
+// v2 dropped tokens.total; historically it was the sum of all components
+// (verified against v1 rows: 11564/11565 match input+output+reasoning+cache).
+function totalTokens(t: AssistantMessageData['tokens']): number {
+  return (
+    (t?.input ?? 0) +
+    (t?.output ?? 0) +
+    (t?.reasoning ?? 0) +
+    (t?.cache?.read ?? 0) +
+    (t?.cache?.write ?? 0)
+  )
 }
 
 export function loadUsageEvents(db: Database, filters: QueryFilters = {}): UsageEvent[] {
@@ -54,6 +65,7 @@ export function loadUsageEvents(db: Database, filters: QueryFilters = {}): Usage
       `SELECT
        m.id,
        m.session_id,
+       m.type,
        m.time_created,
        m.data,
        s.title           AS session_title,
@@ -61,8 +73,8 @@ export function loadUsageEvents(db: Database, filters: QueryFilters = {}): Usage
        s.parent_id       AS session_parent_id,
        s.project_id      AS session_project_id,
        s.time_updated    AS session_time_updated
-     FROM message m
-     JOIN session s ON m.session_id = s.id
+     FROM session_message m
+     JOIN session_v2 s ON m.session_id = s.id
      WHERE m.time_created >= ? AND m.time_created <= ?
      ORDER BY m.time_created ASC
      LIMIT ?`
@@ -79,8 +91,8 @@ export function loadUsageEvents(db: Database, filters: QueryFilters = {}): Usage
       continue
     }
 
-    // Skip non-assistant messages (e.g., user messages)
-    if (data.role !== 'assistant') continue
+    // Skip non-assistant messages (user, system, idle, compaction, …)
+    if (row.type !== 'assistant') continue
 
     const tokens: TokenUsage = {
       input: data.tokens?.input ?? 0,
@@ -88,7 +100,7 @@ export function loadUsageEvents(db: Database, filters: QueryFilters = {}): Usage
       reasoning: data.tokens?.reasoning ?? 0,
       cacheRead: data.tokens?.cache?.read ?? 0,
       cacheWrite: data.tokens?.cache?.write ?? 0,
-      total: data.tokens?.total ?? 0,
+      total: totalTokens(data.tokens),
     }
 
     events.push({
@@ -100,8 +112,8 @@ export function loadUsageEvents(db: Database, filters: QueryFilters = {}): Usage
       projectId: row.session_project_id,
       timeCreated: row.time_created,
       timeCompleted: data.time?.completed ?? null,
-      modelId: data.modelID || 'unknown',
-      providerId: data.providerID || 'unknown',
+      modelId: data.model?.id || 'unknown',
+      providerId: data.model?.providerID || 'unknown',
       agent: data.agent ?? null,
       tokens,
       cost: data.cost ?? 0,
@@ -137,7 +149,7 @@ export function loadSessions(db: Database, filters: QueryFilters = {}): SessionR
   const rows = db
     .prepare<RawSessionRow>(
       `SELECT id, title, directory, parent_id, project_id, time_created, time_updated
-     FROM session
+     FROM session_v2
      WHERE time_created >= ? AND time_created <= ?
      ORDER BY time_created ASC`
     )
@@ -166,6 +178,7 @@ export function* streamUsageEvents(
     `SELECT
        m.id,
        m.session_id,
+       m.type,
        m.time_created,
        m.data,
        s.title           AS session_title,
@@ -173,8 +186,8 @@ export function* streamUsageEvents(
        s.parent_id       AS session_parent_id,
        s.project_id      AS session_project_id,
        s.time_updated    AS session_time_updated
-     FROM message m
-     JOIN session s ON m.session_id = s.id
+     FROM session_message m
+     JOIN session_v2 s ON m.session_id = s.id
      WHERE m.time_created >= ? AND m.time_created <= ?
      ORDER BY m.time_created ASC`
   )
@@ -187,19 +200,19 @@ export function* streamUsageEvents(
       continue
     }
 
-    // Skip non-assistant messages (e.g., user messages)
-    if (data.role !== 'assistant') continue
+    // Skip non-assistant messages (user, system, idle, compaction, …)
+    if (row.type !== 'assistant') continue
 
     // Apply additional filters inline
     if (
       filters.model &&
-      !(data.modelID || 'unknown').toLowerCase().includes(filters.model.toLowerCase())
+      !(data.model?.id || 'unknown').toLowerCase().includes(filters.model.toLowerCase())
     ) {
       continue
     }
     if (
       filters.provider &&
-      !(data.providerID || 'unknown').toLowerCase().includes(filters.provider.toLowerCase())
+      !(data.model?.providerID || 'unknown').toLowerCase().includes(filters.provider.toLowerCase())
     ) {
       continue
     }
@@ -219,7 +232,7 @@ export function* streamUsageEvents(
       reasoning: data.tokens?.reasoning ?? 0,
       cacheRead: data.tokens?.cache?.read ?? 0,
       cacheWrite: data.tokens?.cache?.write ?? 0,
-      total: data.tokens?.total ?? 0,
+      total: totalTokens(data.tokens),
     }
 
     yield {
@@ -231,8 +244,8 @@ export function* streamUsageEvents(
       projectId: row.session_project_id,
       timeCreated: row.time_created,
       timeCompleted: data.time?.completed ?? null,
-      modelId: data.modelID || 'unknown',
-      providerId: data.providerID || 'unknown',
+      modelId: data.model?.id || 'unknown',
+      providerId: data.model?.providerID || 'unknown',
       agent: data.agent ?? null,
       tokens,
       cost: data.cost ?? 0,
@@ -267,15 +280,21 @@ export function getOverviewAggregates(
     SELECT 
       COUNT(*) as messageCount,
       COALESCE(SUM(json_extract(m.data, '$.cost')), 0) as totalCost,
-      COALESCE(SUM(json_extract(m.data, '$.tokens.total')), 0) as totalTokens,
+      COALESCE(SUM(
+        COALESCE(json_extract(m.data, '$.tokens.input'), 0)
+        + COALESCE(json_extract(m.data, '$.tokens.output'), 0)
+        + COALESCE(json_extract(m.data, '$.tokens.reasoning'), 0)
+        + COALESCE(json_extract(m.data, '$.tokens.cache.read'), 0)
+        + COALESCE(json_extract(m.data, '$.tokens.cache.write'), 0)
+      ), 0) as totalTokens,
       COALESCE(SUM(json_extract(m.data, '$.tokens.input')), 0) as totalInput,
       COALESCE(SUM(json_extract(m.data, '$.tokens.output')), 0) as totalOutput,
       COALESCE(SUM(json_extract(m.data, '$.tokens.cache.read')), 0) as totalCacheRead,
       COALESCE(SUM(json_extract(m.data, '$.tokens.cache.write')), 0) as totalCacheWrite,
       COALESCE(SUM(json_extract(m.data, '$.tokens.reasoning')), 0) as totalReasoning
-    FROM message m
+    FROM session_message m
     WHERE m.time_created >= ? AND m.time_created <= ?
-      AND json_extract(m.data, '$.role') = 'assistant'
+      AND m.type = 'assistant'
   `
     )
     .get([fromMs, toMs])
@@ -309,10 +328,16 @@ export function getDailyAggregates(db: Database, fromDate: Date, toDate?: Date):
       `
     SELECT 
       date(m.time_created / 1000, 'unixepoch') as date,
-      COALESCE(SUM(json_extract(m.data, '$.tokens.total')), 0) as tokens
-    FROM message m
+      COALESCE(SUM(
+        COALESCE(json_extract(m.data, '$.tokens.input'), 0)
+        + COALESCE(json_extract(m.data, '$.tokens.output'), 0)
+        + COALESCE(json_extract(m.data, '$.tokens.reasoning'), 0)
+        + COALESCE(json_extract(m.data, '$.tokens.cache.read'), 0)
+        + COALESCE(json_extract(m.data, '$.tokens.cache.write'), 0)
+      ), 0) as tokens
+    FROM session_message m
     WHERE m.time_created >= ? AND m.time_created <= ?
-      AND json_extract(m.data, '$.role') = 'assistant'
+      AND m.type = 'assistant'
     GROUP BY date(m.time_created / 1000, 'unixepoch')
     ORDER BY date ASC
   `
@@ -341,8 +366,8 @@ export function getBudgetStatus(db: Database): BudgetCheck {
         THEN json_extract(m.data, '$.cost') 
         ELSE 0 
       END), 0) as monthCost
-    FROM message m
-    WHERE json_extract(m.data, '$.role') = 'assistant'
+    FROM session_message m
+    WHERE m.type = 'assistant'
   `
     )
     .get([])
@@ -413,7 +438,7 @@ export function loadSessionDetail(db: Database, sessionId: string): SessionDetai
     }>(
       `SELECT id, title, directory, time_created, time_updated,
               summary_additions, summary_deletions, summary_files
-       FROM session WHERE id = ?`
+       FROM session_v2 WHERE id = ?`
     )
     .get([sessionId])
 
@@ -421,51 +446,54 @@ export function loadSessionDetail(db: Database, sessionId: string): SessionDetai
 
   // Load all messages (assistant + user) ordered by time
   const rawMessages = db
-    .prepare<{ id: string; time_created: number; data: string }>(
-      `SELECT id, time_created, data
-       FROM message
+    .prepare<{ id: string; type: string; time_created: number; data: string }>(
+      `SELECT id, type, time_created, data
+       FROM session_message
        WHERE session_id = ?
        ORDER BY time_created ASC`
     )
     .all([sessionId])
 
-  // Load all tool-call parts for this session in one query
-  const rawParts = db
-    .prepare<{ message_id: string; data: string }>(
-      `SELECT p.message_id, p.data
-       FROM part p
-       JOIN message m ON p.message_id = m.id
-       WHERE m.session_id = ?
-         AND p.data LIKE '%"type":"tool"%'
-       ORDER BY p.time_created ASC`
+  // Load tool-call-bearing messages in one query (v2 embeds tool parts in data.content)
+  const rawToolMessages = db
+    .prepare<{ id: string; data: string }>(
+      `SELECT id, data
+       FROM session_message
+       WHERE session_id = ?
+         AND data LIKE '%"type":"tool"%'
+       ORDER BY time_created ASC`
     )
     .all([sessionId])
 
-  // Group parts by message_id
+  // Group tool items by message id
   const partsByMessage = new Map<string, SessionToolCall[]>()
-  for (const row of rawParts) {
-    let d: Record<string, unknown>
+  for (const row of rawToolMessages) {
+    let d: { content?: unknown }
     try {
-      d = JSON.parse(row.data) as Record<string, unknown>
+      d = JSON.parse(row.data) as { content?: unknown }
     } catch {
       continue
     }
-    if (d.type !== 'tool') continue
+    if (!Array.isArray(d.content)) continue
 
-    const tool = (d.tool as string | undefined) ?? 'unknown'
-    const callId = (d.callID as string | undefined) ?? ''
-    const state = d.state as Record<string, unknown> | undefined
-    const status = (state?.status as string | undefined) ?? 'unknown'
-    const outputTruncated =
-      (state?.metadata as Record<string, unknown> | undefined)?.truncated === true
+    for (const item of d.content as Array<Record<string, unknown>>) {
+      if (item?.type !== 'tool') continue
 
-    // Build a compact input summary based on tool type
-    const input = (state?.input as Record<string, unknown> | undefined) ?? {}
-    const inputSummary = summariseToolInput(tool, input)
+      const tool = (item.name as string | undefined) ?? 'unknown'
+      const callId = (item.id as string | undefined) ?? ''
+      const state = item.state as Record<string, unknown> | undefined
+      const status = (state?.status as string | undefined) ?? 'unknown'
+      const outputTruncated =
+        (state?.metadata as Record<string, unknown> | undefined)?.truncated === true
 
-    const list = partsByMessage.get(row.message_id) ?? []
-    list.push({ callId, tool, status, inputSummary, outputTruncated })
-    partsByMessage.set(row.message_id, list)
+      // Build a compact input summary based on tool type
+      const input = (state?.input as Record<string, unknown> | undefined) ?? {}
+      const inputSummary = summariseToolInput(tool, input)
+
+      const list = partsByMessage.get(row.id) ?? []
+      list.push({ callId, tool, status, inputSummary, outputTruncated })
+      partsByMessage.set(row.id, list)
+    }
   }
 
   // Build message list
@@ -478,20 +506,22 @@ export function loadSessionDetail(db: Database, sessionId: string): SessionDetai
       continue
     }
 
-    const role = d.role as 'assistant' | 'user'
+    // v2 keeps role in the type column, not in the data JSON
+    const role = row.type as 'assistant' | 'user'
     if (role !== 'assistant' && role !== 'user') continue
 
     const tokRaw = d.tokens as Record<string, unknown> | undefined
     const cacheRaw = tokRaw?.cache as Record<string, unknown> | undefined
     const timeRaw = d.time as Record<string, unknown> | undefined
+    const modelRaw = d.model as { id?: string; providerID?: string } | undefined
 
     messages.push({
       messageId: row.id,
       timeCreated: row.time_created,
       timeCompleted: (timeRaw?.completed as number | undefined) ?? null,
       role,
-      modelId: (d.modelID as string | undefined) ?? null,
-      providerId: (d.providerID as string | undefined) ?? null,
+      modelId: modelRaw?.id ?? null,
+      providerId: modelRaw?.providerID ?? null,
       agent: (d.agent as string | undefined) ?? null,
       mode: (d.mode as string | undefined) ?? null,
       tokens: {
@@ -500,7 +530,13 @@ export function loadSessionDetail(db: Database, sessionId: string): SessionDetai
         cacheRead: (cacheRaw?.read as number | undefined) ?? 0,
         cacheWrite: (cacheRaw?.write as number | undefined) ?? 0,
         reasoning: (tokRaw?.reasoning as number | undefined) ?? 0,
-        total: (tokRaw?.total as number | undefined) ?? 0,
+        // v2 dropped tokens.total — sum the components like everywhere else
+        total:
+          ((tokRaw?.input as number | undefined) ?? 0) +
+          ((tokRaw?.output as number | undefined) ?? 0) +
+          ((tokRaw?.reasoning as number | undefined) ?? 0) +
+          ((cacheRaw?.read as number | undefined) ?? 0) +
+          ((cacheRaw?.write as number | undefined) ?? 0),
       },
       cost: (d.cost as number | undefined) ?? 0,
       finish: (d.finish as string | undefined) ?? null,

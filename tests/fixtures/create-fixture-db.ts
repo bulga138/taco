@@ -29,9 +29,9 @@ export async function createFixtureDbAsync(): Promise<Database> {
   const SQL = await initSql()
   const db = new SQL.Database()
 
-  // Create tables
+  // Create tables (opencode v2 schema — the columns TACO actually reads)
   db.run(`
-    CREATE TABLE session (
+    CREATE TABLE session_v2 (
       id TEXT PRIMARY KEY,
       title TEXT,
       directory TEXT,
@@ -43,12 +43,13 @@ export async function createFixtureDbAsync(): Promise<Database> {
   `)
 
   db.run(`
-    CREATE TABLE message (
+    CREATE TABLE session_message (
       id TEXT PRIMARY KEY,
       session_id TEXT,
+      type TEXT,
       time_created INTEGER,
       data TEXT,
-      FOREIGN KEY (session_id) REFERENCES session(id)
+      FOREIGN KEY (session_id) REFERENCES session_v2(id)
     )
   `)
 
@@ -124,7 +125,7 @@ export async function createFixtureDbAsync(): Promise<Database> {
 
   for (const s of sessions) {
     db.run(
-      `INSERT INTO session (id, title, directory, parent_id, project_id, time_created, time_updated)
+      `INSERT INTO session_v2 (id, title, directory, parent_id, project_id, time_created, time_updated)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [s.id, s.title, s.directory, s.parent_id, s.project_id, s.time_created, s.time_updated]
     )
@@ -437,10 +438,23 @@ export async function createFixtureDbAsync(): Promise<Database> {
   ]
 
   for (const m of messages) {
+    // Normalize the v1-shaped literals above into the opencode v2 storage shape:
+    // role → type column, modelID/providerID → model{…}, tokens.total dropped.
+    const parsed = JSON.parse(m.data) as Record<string, any>
+    const { role, modelID, providerID, ...rest } = parsed
+    if (rest.tokens) {
+      const { total, ...tokens } = rest.tokens as Record<string, any>
+      rest.tokens = tokens
+    }
+    const data = JSON.stringify({
+      ...rest,
+      ...(modelID ? { model: { id: modelID, providerID } } : {}),
+    })
+
     db.run(
-      `INSERT INTO message (id, session_id, time_created, data)
-       VALUES (?, ?, ?, ?)`,
-      [m.id, m.session_id, m.time_created, m.data]
+      `INSERT INTO session_message (id, session_id, type, time_created, data)
+       VALUES (?, ?, ?, ?, ?)`,
+      [m.id, m.session_id, role === 'user' ? 'user' : 'assistant', m.time_created, data]
     )
   }
 
@@ -519,9 +533,9 @@ export async function exportFixtureDbToFile(filePath: string): Promise<void> {
   // Simpler approach: use sql.js to create + populate then export.
   const db2 = new SQL.Database()
 
-  // Create tables
+  // Create tables (opencode v2 schema)
   db2.run(`
-    CREATE TABLE session (
+    CREATE TABLE session_v2 (
       id TEXT PRIMARY KEY,
       title TEXT,
       directory TEXT,
@@ -532,12 +546,13 @@ export async function exportFixtureDbToFile(filePath: string): Promise<void> {
     )
   `)
   db2.run(`
-    CREATE TABLE message (
+    CREATE TABLE session_message (
       id TEXT PRIMARY KEY,
       session_id TEXT,
+      type TEXT,
       time_created INTEGER,
       data TEXT,
-      FOREIGN KEY (session_id) REFERENCES session(id)
+      FOREIGN KEY (session_id) REFERENCES session_v2(id)
     )
   `)
 
@@ -551,12 +566,12 @@ export async function exportFixtureDbToFile(filePath: string): Promise<void> {
       project_id: string | null
       time_created: number
       time_updated: number
-    }>('SELECT * FROM session')
+    }>('SELECT * FROM session_v2')
     .all()
 
   for (const s of sessions) {
     db2.run(
-      'INSERT INTO session (id, title, directory, parent_id, project_id, time_created, time_updated) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO session_v2 (id, title, directory, parent_id, project_id, time_created, time_updated) VALUES (?, ?, ?, ?, ?, ?, ?)',
       [s.id, s.title, s.directory, s.parent_id, s.project_id, s.time_created, s.time_updated]
     )
   }
@@ -565,18 +580,17 @@ export async function exportFixtureDbToFile(filePath: string): Promise<void> {
     .prepare<{
       id: string
       session_id: string
+      type: string
       time_created: number
       data: string
-    }>('SELECT * FROM message')
+    }>('SELECT * FROM session_message')
     .all()
 
   for (const m of messages) {
-    db2.run('INSERT INTO message (id, session_id, time_created, data) VALUES (?, ?, ?, ?)', [
-      m.id,
-      m.session_id,
-      m.time_created,
-      m.data,
-    ])
+    db2.run(
+      'INSERT INTO session_message (id, session_id, type, time_created, data) VALUES (?, ?, ?, ?, ?)',
+      [m.id, m.session_id, m.type, m.time_created, m.data]
+    )
   }
 
   wrapper.close()

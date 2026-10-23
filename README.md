@@ -226,7 +226,7 @@ Charts in your terminal
 Real spend/budget overlaid on local estimates
 ```
 
-Database location (all platforms): `~/.local/share/opencode/opencode.db`
+Database location (all platforms): `~/.local/share/opencode/opencode.db` (OpenCode v2+ — TACO reads the `session_v2`/`session_message` tables)
 
 ## Under the hood
 
